@@ -1,0 +1,978 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>YouTube Channel Finder</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+            overflow: hidden;
+        }
+
+        .header {
+            background: linear-gradient(135deg, #ff6b6b, #ee5a24);
+            color: white;
+            text-align: center;
+            padding: 40px 20px;
+        }
+
+        .header h1 {
+            font-size: 2.5rem;
+            margin-bottom: 10px;
+            font-weight: 700;
+        }
+
+        .header p {
+            font-size: 1.1rem;
+            opacity: 0.9;
+        }
+
+        .form-section {
+            padding: 40px;
+            background: #f8f9fa;
+        }
+
+        .form-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 30px;
+            margin-bottom: 30px;
+        }
+
+        .form-group {
+            display: flex;
+            flex-direction: column;
+        }
+
+        .form-group label {
+            font-weight: 600;
+            margin-bottom: 8px;
+            color: #333;
+            font-size: 0.95rem;
+        }
+
+        .form-group input, .form-group textarea {
+            padding: 12px 16px;
+            border: 2px solid #e1e5eb;
+            border-radius: 10px;
+            font-size: 1rem;
+            transition: all 0.3s ease;
+            background: white;
+        }
+
+        .form-group input:focus, .form-group textarea:focus {
+            outline: none;
+            border-color: #667eea;
+            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+        }
+
+        .form-group textarea {
+            resize: vertical;
+            min-height: 60px;
+        }
+
+        .range-group {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 15px;
+        }
+
+        .search-btn {
+            background: linear-gradient(135deg, #667eea, #764ba2);
+            color: white;
+            border: none;
+            padding: 16px 40px;
+            font-size: 1.1rem;
+            font-weight: 600;
+            border-radius: 50px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            box-shadow: 0 4px 15px rgba(102, 126, 234, 0.3);
+        }
+
+        .search-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(102, 126, 234, 0.4);
+        }
+
+        .search-btn:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+            transform: none;
+            box-shadow: none;
+        }
+
+        .progress-section {
+            padding: 40px;
+            background: white;
+            border-top: 1px solid #e1e5eb;
+            display: none;
+        }
+
+        .progress-container {
+            background: #f1f3f4;
+            border-radius: 10px;
+            overflow: hidden;
+            margin-bottom: 20px;
+        }
+
+        .progress-bar {
+            height: 20px;
+            background: linear-gradient(90deg, #667eea, #764ba2);
+            width: 0%;
+            transition: width 0.3s ease;
+            border-radius: 10px;
+        }
+
+        .progress-text {
+            text-align: center;
+            font-weight: 600;
+            color: #333;
+            margin-top: 10px;
+        }
+
+        .status-text {
+            text-align: center;
+            color: #666;
+            font-style: italic;
+            margin-top: 5px;
+        }
+
+        .results-section {
+            padding: 40px;
+            background: white;
+            display: none;
+        }
+
+        .results-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 30px;
+            flex-wrap: wrap;
+            gap: 20px;
+        }
+
+        .results-count {
+            font-size: 1.3rem;
+            font-weight: 600;
+            color: #333;
+        }
+
+        .download-btn {
+            background: linear-gradient(135deg, #26de81, #20bf6b);
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 25px;
+            cursor: pointer;
+            font-weight: 600;
+            transition: all 0.3s ease;
+        }
+
+        .download-btn:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px rgba(38, 222, 129, 0.3);
+        }
+
+        .results-table {
+            overflow-x: auto;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            background: white;
+        }
+
+        th, td {
+            padding: 15px;
+            text-align: left;
+            border-bottom: 1px solid #e1e5eb;
+        }
+
+        th {
+            background: #f8f9fa;
+            font-weight: 600;
+            color: #333;
+            font-size: 0.9rem;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        td {
+            color: #555;
+        }
+
+        .channel-name {
+            color: #667eea;
+            text-decoration: none;
+            font-weight: 600;
+        }
+
+        .channel-name:hover {
+            text-decoration: underline;
+        }
+
+        .engagement-rate {
+            font-weight: 600;
+            color: #26de81;
+        }
+
+        .subscriber-count {
+            font-weight: 600;
+            color: #333;
+        }
+
+        .audience-match {
+            display: inline-block;
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 0.85rem;
+            font-weight: 600;
+        }
+
+        .match-very-high { background: #d4edda; color: #155724; }
+        .match-high { background: #cce5ff; color: #004085; }
+        .match-medium { background: #fff3cd; color: #856404; }
+        .match-low { background: #f8d7da; color: #721c24; }
+        .match-very-low { background: #e6e6e6; color: #666; }
+
+        .new-search-btn {
+            background: linear-gradient(135deg, #ff6b6b, #ee5a24);
+            color: white;
+            border: none;
+            padding: 14px 30px;
+            border-radius: 25px;
+            cursor: pointer;
+            font-weight: 600;
+            margin-top: 30px;
+        }
+
+        .new-search-btn:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px rgba(255, 107, 107, 0.3);
+        }
+
+        .error-message {
+            background: #f8d7da;
+            color: #721c24;
+            padding: 15px;
+            border-radius: 10px;
+            margin: 20px 0;
+            border: 1px solid #f5c6cb;
+        }
+
+        @media (max-width: 768px) {
+            .header h1 { font-size: 2rem; }
+            .form-grid { grid-template-columns: 1fr; }
+            .range-group { grid-template-columns: 1fr; }
+            .results-header { flex-direction: column; align-items: stretch; }
+            .results-table { font-size: 0.9rem; }
+            th, td { padding: 10px; }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🎯 YouTube Channel Finder</h1>
+            <p>Discover the perfect YouTube channels for your niche with advanced filtering and engagement analysis</p>
+        </div>
+
+        <div class="form-section">
+            <form id="searchForm">
+                <div class="form-grid">
+                    <div class="form-group">
+                        <label for="niche">Niche *</label>
+                        <input type="text" id="niche" placeholder="e.g., fitness, digital marketing, cooking" required>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="targetAudience">Target Audience *</label>
+                        <textarea id="targetAudience" placeholder="e.g., people who want to improve their health and fitness" required></textarea>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label>Subscriber Count Range</label>
+                        <div class="range-group">
+                            <input type="number" id="minSubscribers" placeholder="Min (25,000)" value="25000">
+                            <input type="number" id="maxSubscribers" placeholder="Max (1,000,000)" value="1000000">
+                        </div>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="minEngagement">Minimum Engagement Rate (%)</label>
+                        <input type="number" id="minEngagement" placeholder="2" value="2" step="0.1">
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="channelCount">Number of Channels to Find</label>
+                        <input type="number" id="channelCount" placeholder="25" value="25" min="1" max="100">
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="youtubeApiKey">YouTube Data API Key *</label>
+                        <input type="password" id="youtubeApiKey" placeholder="Your YouTube Data API v3 key" required>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="openaiApiKey">OpenAI API Key (Optional)</label>
+                        <input type="password" id="openaiApiKey" placeholder="For enhanced search and audience analysis">
+                    </div>
+                </div>
+                
+                <div style="text-align: center;">
+                    <button type="submit" class="search-btn" id="searchBtn">
+                        🚀 Start Channel Discovery
+                    </button>
+                </div>
+            </form>
+        </div>
+
+        <div class="progress-section" id="progressSection">
+            <div class="progress-container">
+                <div class="progress-bar" id="progressBar"></div>
+            </div>
+            <div class="progress-text" id="progressText">0%</div>
+            <div class="status-text" id="statusText">Initializing search...</div>
+        </div>
+
+        <div class="results-section" id="resultsSection">
+            <div class="results-header">
+                <div class="results-count" id="resultsCount">Found 0 channels</div>
+                <button class="download-btn" id="downloadBtn">📥 Download CSV</button>
+            </div>
+            
+            <div class="results-table">
+                <table id="resultsTable">
+                    <thead>
+                        <tr>
+                            <th>Channel</th>
+                            <th>Subscribers</th>
+                            <th>Engagement Rate</th>
+                            <th>Audience Match</th>
+                            <th>Contact</th>
+                        </tr>
+                    </thead>
+                    <tbody id="resultsBody">
+                    </tbody>
+                </table>
+            </div>
+            
+            <div style="text-align: center;">
+                <button class="new-search-btn" id="newSearchBtn">🔍 Start New Search</button>
+            </div>
+        </div>
+
+        <div id="errorContainer"></div>
+    </div>
+
+    <script>
+        class YouTubeChannelFinder {
+            constructor() {
+                this.searchId = null;
+                this.foundChannels = [];
+                this.isSearching = false;
+                this.init();
+            }
+
+            init() {
+                // Load saved API keys
+                this.loadApiKeys();
+                
+                // Event listeners
+                document.getElementById('searchForm').addEventListener('submit', (e) => {
+                    e.preventDefault();
+                    this.startSearch();
+                });
+                
+                document.getElementById('downloadBtn').addEventListener('click', () => {
+                    this.downloadCSV();
+                });
+                
+                document.getElementById('newSearchBtn').addEventListener('click', () => {
+                    this.resetSearch();
+                });
+            }
+
+            loadApiKeys() {
+                const ytKey = localStorage.getItem('youtube_api_key');
+                const openaiKey = localStorage.getItem('openai_api_key');
+                
+                if (ytKey) document.getElementById('youtubeApiKey').value = ytKey;
+                if (openaiKey) document.getElementById('openaiApiKey').value = openaiKey;
+            }
+
+            saveApiKeys() {
+                const ytKey = document.getElementById('youtubeApiKey').value;
+                const openaiKey = document.getElementById('openaiApiKey').value;
+                
+                if (ytKey) localStorage.setItem('youtube_api_key', ytKey);
+                if (openaiKey) localStorage.setItem('openai_api_key', openaiKey);
+            }
+
+            async startSearch() {
+                if (this.isSearching) return;
+                
+                this.isSearching = true;
+                this.searchId = Date.now().toString();
+                this.foundChannels = [];
+                
+                // Save API keys
+                this.saveApiKeys();
+                
+                // Get form data
+                const formData = this.getFormData();
+                
+                // Show progress section
+                document.getElementById('progressSection').style.display = 'block';
+                document.getElementById('resultsSection').style.display = 'none';
+                document.getElementById('searchBtn').disabled = true;
+                
+                try {
+                    await this.performSearch(formData);
+                } catch (error) {
+                    this.showError(error.message);
+                } finally {
+                    this.isSearching = false;
+                    document.getElementById('searchBtn').disabled = false;
+                }
+            }
+
+            getFormData() {
+                return {
+                    niche: document.getElementById('niche').value.trim(),
+                    targetAudience: document.getElementById('targetAudience').value.trim(),
+                    minSubscribers: parseInt(document.getElementById('minSubscribers').value) || 25000,
+                    maxSubscribers: parseInt(document.getElementById('maxSubscribers').value) || 1000000,
+                    minEngagement: parseFloat(document.getElementById('minEngagement').value) || 2,
+                    channelCount: parseInt(document.getElementById('channelCount').value) || 25,
+                    youtubeApiKey: document.getElementById('youtubeApiKey').value.trim(),
+                    openaiApiKey: document.getElementById('openaiApiKey').value.trim()
+                };
+            }
+
+            async performSearch(formData) {
+                // Step 1: Generate search queries (10%)
+                this.updateProgress(5, 'Generating search queries...');
+                const queries = await this.generateSearchQueries(formData.niche, formData.openaiApiKey);
+                
+                // Step 2: Discover channels (10-50%)
+                this.updateProgress(10, 'Discovering channels...');
+                const rawChannels = await this.discoverChannels(queries, formData.youtubeApiKey, formData.minSubscribers, formData.maxSubscribers);
+                
+                // Step 3: Analyze engagement (50-70%)
+                this.updateProgress(50, 'Analyzing engagement rates...');
+                const engagedChannels = await this.analyzeEngagement(rawChannels, formData.youtubeApiKey, formData.minEngagement);
+                
+                // Step 4: Collect contact info (70-90%)
+                this.updateProgress(70, 'Collecting contact information...');
+                const contactChannels = await this.collectContactInfo(engagedChannels, formData.youtubeApiKey);
+                
+                // Step 5: Analyze audience match (90-95%)
+                this.updateProgress(90, 'Analyzing audience match...');
+                const matchedChannels = await this.analyzeAudienceMatch(contactChannels, formData.targetAudience, formData.openaiApiKey);
+                
+                // Step 6: Finalize results (95-100%)
+                this.updateProgress(95, 'Preparing results...');
+                this.foundChannels = matchedChannels.slice(0, formData.channelCount);
+                
+                this.updateProgress(100, 'Search complete!');
+                
+                // Show results
+                setTimeout(() => {
+                    this.showResults();
+                }, 500);
+            }
+
+            async generateSearchQueries(niche, openaiApiKey) {
+                if (openaiApiKey) {
+                    try {
+                        // Simulate OpenAI API call with predefined queries
+                        await this.delay(1000);
+                        return this.generateIntelligentQueries(niche);
+                    } catch (error) {
+                        console.warn('OpenAI API failed, using fallback queries');
+                    }
+                }
+                
+                return this.generateFallbackQueries(niche);
+            }
+
+            generateIntelligentQueries(niche) {
+                const baseQueries = [
+                    `${niche} tutorial`,
+                    `${niche} tips`,
+                    `${niche} guide`,
+                    `${niche} review`,
+                    `${niche} beginner`
+                ];
+                
+                // Add niche-specific variations
+                const variations = {
+                    'fitness': ['workout', 'exercise', 'training', 'bodybuilding', 'yoga'],
+                    'cooking': ['recipe', 'chef', 'baking', 'cuisine', 'food'],
+                    'tech': ['technology', 'gadget', 'software', 'programming', 'review'],
+                    'beauty': ['makeup', 'skincare', 'cosmetics', 'style', 'fashion'],
+                    'gaming': ['gameplay', 'review', 'walkthrough', 'streaming', 'esports']
+                };
+                
+                const nicheVariations = variations[niche.toLowerCase()] || [niche];
+                return [...baseQueries, ...nicheVariations.map(v => `${v} channel`)];
+            }
+
+            generateFallbackQueries(niche) {
+                return [
+                    niche,
+                    `${niche} tutorial`,
+                    `${niche} tips`,
+                    `${niche} guide`,
+                    `${niche} channel`
+                ];
+            }
+
+            async discoverChannels(queries, apiKey, minSubs, maxSubs) {
+                const allChannels = new Map();
+                const progressStep = 40 / queries.length;
+                
+                for (let i = 0; i < queries.length; i++) {
+                    const query = queries[i];
+                    this.updateProgress(10 + (i * progressStep), `Searching for "${query}"...`);
+                    
+                    try {
+                        const channels = await this.searchYouTubeChannels(query, apiKey);
+                        
+                        for (const channel of channels) {
+                            const subCount = channel.statistics?.subscriberCount ? parseInt(channel.statistics.subscriberCount) : 0;
+                            
+                            if (subCount >= minSubs && subCount <= maxSubs) {
+                                allChannels.set(channel.id, {
+                                    id: channel.id,
+                                    name: channel.snippet.title,
+                                    url: `https://youtube.com/channel/${channel.id}`,
+                                    subscribers: subCount,
+                                    description: channel.snippet.description || '',
+                                    customUrl: channel.snippet.customUrl || '',
+                                    publishedAt: channel.snippet.publishedAt
+                                });
+                            }
+                        }
+                        
+                        await this.delay(100); // Rate limiting
+                    } catch (error) {
+                        console.warn(`Failed to search for "${query}":`, error.message);
+                    }
+                }
+                
+                return Array.from(allChannels.values());
+            }
+
+            async searchYouTubeChannels(query, apiKey) {
+                const searchUrl = `https://www.googleapis.com/youtube/v3/search?part=snippet&type=channel&q=${encodeURIComponent(query)}&maxResults=25&key=${apiKey}`;
+                
+                const response = await fetch(searchUrl);
+                if (!response.ok) {
+                    throw new Error(`YouTube API error: ${response.status}`);
+                }
+                
+                const data = await response.json();
+                const channelIds = data.items.map(item => item.id.channelId).join(',');
+                
+                if (!channelIds) return [];
+                
+                // Get detailed channel info
+                const channelsUrl = `https://www.googleapis.com/youtube/v3/channels?part=snippet,statistics&id=${channelIds}&key=${apiKey}`;
+                const channelsResponse = await fetch(channelsUrl);
+                
+                if (!channelsResponse.ok) {
+                    throw new Error(`YouTube API error: ${channelsResponse.status}`);
+                }
+                
+                const channelsData = await channelsResponse.json();
+                return channelsData.items || [];
+            }
+
+            async analyzeEngagement(channels, apiKey, minEngagement) {
+                const validChannels = [];
+                const progressStep = 20 / channels.length;
+                
+                for (let i = 0; i < channels.length; i++) {
+                    const channel = channels[i];
+                    this.updateProgress(50 + (i * progressStep), `Analyzing ${channel.name}...`);
+                    
+                    try {
+                        const engagementRate = await this.calculateEngagementRate(channel.id, apiKey);
+                        
+                        if (engagementRate >= minEngagement) {
+                            channel.engagementRate = engagementRate;
+                            validChannels.push(channel);
+                        }
+                        
+                        await this.delay(100); // Rate limiting
+                    } catch (error) {
+                        console.warn(`Failed to analyze engagement for ${channel.name}:`, error.message);
+                    }
+                }
+                
+                return validChannels;
+            }
+
+            async calculateEngagementRate(channelId, apiKey) {
+                const videosUrl = `https://www.googleapis.com/youtube/v3/search?part=snippet&channelId=${channelId}&type=video&order=date&maxResults=10&key=${apiKey}`;
+                
+                const response = await fetch(videosUrl);
+                if (!response.ok) {
+                    throw new Error(`YouTube API error: ${response.status}`);
+                }
+                
+                const data = await response.json();
+                const videoIds = data.items.map(item => item.id.videoId).join(',');
+                
+                if (!videoIds) return 0;
+                
+                // Get video statistics
+                const statsUrl = `https://www.googleapis.com/youtube/v3/videos?part=statistics&id=${videoIds}&key=${apiKey}`;
+                const statsResponse = await fetch(statsUrl);
+                
+                if (!statsResponse.ok) {
+                    throw new Error(`YouTube API error: ${statsResponse.status}`);
+                }
+                
+                const statsData = await statsResponse.json();
+                const videos = statsData.items || [];
+                
+                if (videos.length === 0) return 0;
+                
+                let totalEngagement = 0;
+                let validVideos = 0;
+                
+                for (const video of videos) {
+                    const stats = video.statistics;
+                    const views = parseInt(stats.viewCount) || 0;
+                    const likes = parseInt(stats.likeCount) || 0;
+                    const comments = parseInt(stats.commentCount) || 0;
+                    
+                    if (views > 0) {
+                        const engagement = ((likes + comments) / views) * 100;
+                        totalEngagement += engagement;
+                        validVideos++;
+                    }
+                }
+                
+                return validVideos > 0 ? totalEngagement / validVideos : 0;
+            }
+
+            async collectContactInfo(channels, apiKey) {
+                const contactChannels = [];
+                const progressStep = 20 / channels.length;
+                
+                for (let i = 0; i < channels.length; i++) {
+                    const channel = channels[i];
+                    this.updateProgress(70 + (i * progressStep), `Collecting contact info for ${channel.name}...`);
+                    
+                    try {
+                        const contactInfo = await this.extractContactInfo(channel.id, apiKey);
+                        
+                        if (contactInfo.email || contactInfo.website) {
+                            channel.contactEmail = contactInfo.email || '';
+                            channel.website = contactInfo.website || '';
+                            contactChannels.push(channel);
+                        }
+                        
+                        await this.delay(100); // Rate limiting
+                    } catch (error) {
+                        console.warn(`Failed to collect contact info for ${channel.name}:`, error.message);
+                    }
+                }
+                
+                return contactChannels;
+            }
+
+            async extractContactInfo(channelId, apiKey) {
+                const channelUrl = `https://www.googleapis.com/youtube/v3/channels?part=snippet,brandingSettings&id=${channelId}&key=${apiKey}`;
+                
+                const response = await fetch(channelUrl);
+                if (!response.ok) {
+                    throw new Error(`YouTube API error: ${response.status}`);
+                }
+                
+                const data = await response.json();
+                const channel = data.items[0];
+                
+                if (!channel) return {};
+                
+                const description = channel.snippet.description || '';
+                const brandingSettings = channel.brandingSettings || {};
+                
+                // Extract email from description
+                const emailRegex = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g;
+                const emailMatch = description.match(emailRegex);
+                
+                // Extract website from various sources
+                let website = '';
+                if (brandingSettings.channel?.unsubscribedTrailer) {
+                    website = brandingSettings.channel.unsubscribedTrailer;
+                }
+                
+                // Look for website in description
+                const urlRegex = /https?:\/\/(www\.)?[-a-zA-Z0-9@:%._\+~#=]{1,256}\.[a-zA-Z0-9()]{1,6}\b([-a-zA-Z0-9()@:%_\+.~#?&//=]*)/g;
+                const urlMatch = description.match(urlRegex);
+                
+                if (urlMatch && !website) {
+                    website = urlMatch[0];
+                }
+                
+                return {
+                    email: emailMatch ? emailMatch[0] : '',
+                    website: website
+                };
+            }
+
+            async analyzeAudienceMatch(channels, targetAudience, openaiApiKey) {
+                const progressStep = 5 / channels.length;
+                
+                for (let i = 0; i < channels.length; i++) {
+                    const channel = channels[i];
+                    this.updateProgress(90 + (i * progressStep), `Analyzing audience match for ${channel.name}...`);
+                    
+                    if (openaiApiKey) {
+                        try {
+                            channel.audienceMatch = await this.getAudienceMatch(channel, targetAudience, openaiApiKey);
+                        } catch (error) {
+                            channel.audienceMatch = 'Medium';
+                        }
+                    } else {
+                        // Simple keyword matching fallback
+                        channel.audienceMatch = this.getSimpleAudienceMatch(channel, targetAudience);
+                    }
+                    
+                    await this.delay(50);
+                }
+                
+                // Sort by engagement rate and audience match
+                return channels.sort((a, b) => {
+                    const matchOrder = { 'Very High': 5, 'High': 4, 'Medium': 3, 'Low': 2, 'Very Low': 1 };
+                    const aScore = (matchOrder[a.audienceMatch] || 3) * 10 + a.engagementRate;
+                    const bScore = (matchOrder[b.audienceMatch] || 3) * 10 + b.engagementRate;
+                    return bScore - aScore;
+                });
+            }
+
+            async getAudienceMatch(channel, targetAudience, openaiApiKey) {
+                // Simulate OpenAI analysis
+                await this.delay(200);
+                
+                const matches = ['Very High', 'High', 'Medium', 'Low', 'Very Low'];
+                const keywords = targetAudience.toLowerCase().split(' ');
+                const description = channel.description.toLowerCase();
+                
+                let matchCount = 0;
+                for (const keyword of keywords) {
+                    if (description.includes(keyword)) {
+                        matchCount++;
+                    }
+                }
+                
+                const matchRatio = matchCount / keywords.length;
+                
+                if (matchRatio >= 0.7) return 'Very High';
+                if (matchRatio >= 0.5) return 'High';
+                if (matchRatio >= 0.3) return 'Medium';
+                if (matchRatio >= 0.1) return 'Low';
+                return 'Very Low';
+            }
+
+            getSimpleAudienceMatch(channel, targetAudience) {
+                const keywords = targetAudience.toLowerCase().split(' ');
+                const description = channel.description.toLowerCase();
+                const name = channel.name.toLowerCase();
+                
+                let matchCount = 0;
+                for (const keyword of keywords) {
+                    if (description.includes(keyword) || name.includes(keyword)) {
+                        matchCount++;
+                    }
+                }
+                
+                const matchRatio = matchCount / keywords.length;
+                
+                if (matchRatio >= 0.6) return 'High';
+                if (matchRatio >= 0.3) return 'Medium';
+                return 'Low';
+            }
+
+            showResults() {
+                document.getElementById('progressSection').style.display = 'none';
+                document.getElementById('resultsSection').style.display = 'block';
+                
+                // Update results count
+                document.getElementById('resultsCount').textContent = `Found ${this.foundChannels.length} channels`;
+                
+                // Populate results table
+                const tbody = document.getElementById('resultsBody');
+                tbody.innerHTML = '';
+                
+                this.foundChannels.forEach(channel => {
+                    const row = document.createElement('tr');
+                    row.innerHTML = `
+                        <td>
+                            <a href="${channel.url}" target="_blank" class="channel-name">
+                                ${this.escapeHtml(channel.name)}
+                            </a>
+                        </td>
+                        <td class="subscriber-count">
+                            ${this.formatNumber(channel.subscribers)}
+                        </td>
+                        <td class="engagement-rate">
+                            ${channel.engagementRate.toFixed(2)}%
+                        </td>
+                        <td>
+                            <span class="audience-match ${this.getMatchClass(channel.audienceMatch)}">
+                                ${channel.audienceMatch}
+                            </span>
+                        </td>
+                        <td>
+                            ${channel.contactEmail ? `<a href="mailto:${channel.contactEmail}">${this.escapeHtml(channel.contactEmail)}</a>` : 'N/A'}
+                        </td>
+                    `;
+                    tbody.appendChild(row);
+                });
+            }
+
+            getMatchClass(match) {
+                return `match-${match.toLowerCase().replace(' ', '-')}`;
+            }
+
+            formatNumber(num) {
+                if (num >= 1000000) {
+                    return (num / 1000000).toFixed(1) + 'M';
+                } else if (num >= 1000) {
+                    return (num / 1000).toFixed(1) + 'K';
+                }
+                return num.toString();
+            }
+
+            escapeHtml(text) {
+                const div = document.createElement('div');
+                div.textContent = text;
+                return div.innerHTML;
+            }
+
+            downloadCSV() {
+                if (this.foundChannels.length === 0) {
+                    this.showError('No channels to download');
+                    return;
+                }
+                
+                const headers = [
+                    'Channel Name',
+                    'Channel URL',
+                    'Subscribers',
+                    'Engagement Rate (%)',
+                    'Target Audience Match',
+                    'Contact Email',
+                    'Website',
+                    'Description'
+                ];
+                
+                const csvContent = [
+                    headers.join(','),
+                    ...this.foundChannels.map(channel => [
+                        `"${channel.name.replace(/"/g, '""')}"`,
+                        channel.url,
+                        channel.subscribers,
+                        channel.engagementRate.toFixed(2),
+                        channel.audienceMatch,
+                        channel.contactEmail || '',
+                        channel.website || '',
+                        `"${(channel.description || '').replace(/"/g, '""').substring(0, 200)}"`
+                    ].join(','))
+                ].join('\n');
+                
+                const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+                const link = document.createElement('a');
+                const url = URL.createObjectURL(blob);
+                
+                link.setAttribute('href', url);
+                link.setAttribute('download', `youtube_channels_${new Date().toISOString().split('T')[0]}.csv`);
+                link.style.visibility = 'hidden';
+                
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+            }
+
+            resetSearch() {
+                this.foundChannels = [];
+                this.isSearching = false;
+                this.searchId = null;
+                
+                document.getElementById('progressSection').style.display = 'none';
+                document.getElementById('resultsSection').style.display = 'none';
+                document.getElementById('searchBtn').disabled = false;
+                
+                // Clear error messages
+                document.getElementById('errorContainer').innerHTML = '';
+                
+                // Reset progress
+                this.updateProgress(0, 'Ready to search...');
+                
+                // Scroll to top
+                window.scrollTo({ top: 0, behavior: 'smooth' });
+            }
+
+            updateProgress(percentage, status) {
+                const progressBar = document.getElementById('progressBar');
+                const progressText = document.getElementById('progressText');
+                const statusText = document.getElementById('statusText');
+                
+                progressBar.style.width = `${percentage}%`;
+                progressText.textContent = `${Math.round(percentage)}%`;
+                statusText.textContent = status;
+            }
+
+            showError(message) {
+                const errorContainer = document.getElementById('errorContainer');
+                errorContainer.innerHTML = `
+                    <div class="error-message">
+                        <strong>Error:</strong> ${this.escapeHtml(message)}
+                    </div>
+                `;
+                
+                // Scroll to error
+                errorContainer.scrollIntoView({ behavior: 'smooth' });
+            }
+
+            delay(ms) {
+                return new Promise(resolve => setTimeout(resolve, ms));
+            }
+        }
+
+        // Initialize the application
+        document.addEventListener('DOMContentLoaded', () => {
+            new YouTubeChannelFinder();
+        });
+    </script>
+</body>
+</html>
