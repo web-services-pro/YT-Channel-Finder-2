@@ -748,15 +748,8 @@
                         // Add all contact info to channel
                         Object.assign(channel, contactInfo);
                         
-                        // Include channel if it has any contact info
-                        if (contactInfo.email || contactInfo.website || contactInfo.instagram || 
-                            contactInfo.twitter || contactInfo.facebook || contactInfo.tiktok || 
-                            contactInfo.linkedin) {
-                            contactChannels.push(channel);
-                        } else {
-                            // Include channel even without contact info
-                            contactChannels.push(channel);
-                        }
+                        // Include channel regardless of contact info
+                        contactChannels.push(channel);
                         
                         await this.delay(100); // Rate limiting
                     } catch (error) {
@@ -791,25 +784,14 @@
                 const emailMatches = description.match(emailRegex);
                 const email = emailMatches ? emailMatches[0] : '';
                 
-                // Extract website URLs with improved regex
-                const urlRegex = /https?:\/\/(?:[-\w.])+(?:\:[0-9]+)?(?:\/(?:[\w\/_.])*(?:\?(?:[\w&=%.])*)?(?:\#(?:[\w.])*)?)?/g;
-                const urlMatches = description.match(urlRegex);
+                // Extract all links from description
+                const allLinks = this.extractAllLinks(description);
                 
-                // Filter out social media URLs for website field
-                let website = '';
-                if (urlMatches) {
-                    const socialDomains = ['instagram.com', 'twitter.com', 'facebook.com', 'tiktok.com', 'linkedin.com', 'youtube.com', 'youtu.be'];
-                    for (const url of urlMatches) {
-                        const isSocial = socialDomains.some(domain => url.toLowerCase().includes(domain));
-                        if (!isSocial) {
-                            website = url;
-                            break;
-                        }
-                    }
-                }
+                // Categorize links
+                const socialMedia = this.categorizeSocialMedia(allLinks);
                 
-                // Extract social media links
-                const socialMedia = this.extractSocialMedia(description);
+                // Find website (non-social media links)
+                const website = this.findWebsite(allLinks, socialMedia);
                 
                 // Check monetization status
                 const monetization = this.analyzeMonetization(description, status);
@@ -826,7 +808,22 @@
                 };
             }
 
-            extractSocialMedia(description) {
+            extractAllLinks(text) {
+                // Comprehensive URL extraction
+                const urlRegex = /(?:https?:\/\/)?(?:www\.)?[-a-zA-Z0-9@:%._\+~#=]{1,256}\.[a-zA-Z0-9()]{1,6}\b(?:[-a-zA-Z0-9()@:%_\+.~#?&//=]*)/gi;
+                const matches = text.match(urlRegex) || [];
+                
+                // Process and normalize URLs
+                return matches.map(url => {
+                    // Add https:// if missing
+                    if (!url.startsWith('http://') && !url.startsWith('https://')) {
+                        url = 'https://' + url;
+                    }
+                    return url;
+                });
+            }
+
+            categorizeSocialMedia(links) {
                 const social = {
                     instagram: '',
                     twitter: '',
@@ -835,71 +832,89 @@
                     linkedin: ''
                 };
                 
-                // Instagram patterns
-                const igPatterns = [
-                    /(?:https?:\/\/)?(?:www\.)?instagram\.com\/([a-zA-Z0-9_.]+)/gi,
-                    /(?:^|\s)@([a-zA-Z0-9_.]+)(?=\s|$)/gi,
-                    /IG:\s*@?([a-zA-Z0-9_.]+)/gi
-                ];
-                
-                for (const pattern of igPatterns) {
-                    const match = description.match(pattern);
+                // Instagram detection
+                const instagramRegex = /(?:instagram\.com|instagr\.am)\/([^\/\?]+)/i;
+                for (const link of links) {
+                    const match = link.match(instagramRegex);
                     if (match && !social.instagram) {
-                        if (pattern.source.includes('instagram.com')) {
-                            social.instagram = match[0];
-                        } else {
-                            const username = match[0].replace(/[@\s:IG]/g, '');
-                            if (username.length > 2) {
-                                social.instagram = `https://instagram.com/${username}`;
-                            }
-                        }
+                        social.instagram = link;
                         break;
                     }
                 }
                 
-                // Twitter/X patterns
-                const twitterPatterns = [
-                    /(?:https?:\/\/)?(?:www\.)?(?:twitter\.com|x\.com)\/([a-zA-Z0-9_]+)/gi,
-                    /(?:Twitter|X):\s*@?([a-zA-Z0-9_]+)/gi
-                ];
-                
-                for (const pattern of twitterPatterns) {
-                    const match = description.match(pattern);
+                // Twitter/X detection
+                const twitterRegex = /(?:twitter\.com|x\.com)\/([^\/\?]+)/i;
+                for (const link of links) {
+                    const match = link.match(twitterRegex);
                     if (match && !social.twitter) {
-                        if (pattern.source.includes('twitter.com') || pattern.source.includes('x.com')) {
-                            social.twitter = match[0];
-                        } else {
-                            const username = match[0].replace(/[Twitter:X@\s]/g, '');
-                            if (username.length > 2) {
-                                social.twitter = `https://twitter.com/${username}`;
-                            }
-                        }
+                        social.twitter = link;
                         break;
                     }
                 }
                 
-                // Facebook patterns
-                const fbPattern = /(?:https?:\/\/)?(?:www\.)?facebook\.com\/([a-zA-Z0-9_.]+)/gi;
-                const fbMatch = description.match(fbPattern);
-                if (fbMatch) {
-                    social.facebook = fbMatch[0];
+                // Facebook detection
+                const facebookRegex = /(?:facebook\.com|fb\.com|fb\.me)\/([^\/\?]+)/i;
+                for (const link of links) {
+                    const match = link.match(facebookRegex);
+                    if (match && !social.facebook) {
+                        social.facebook = link;
+                        break;
+                    }
                 }
                 
-                // TikTok patterns
-                const tiktokPattern = /(?:https?:\/\/)?(?:www\.)?tiktok\.com\/@?([a-zA-Z0-9_.]+)/gi;
-                const tiktokMatch = description.match(tiktokPattern);
-                if (tiktokMatch) {
-                    social.tiktok = tiktokMatch[0];
+                // TikTok detection
+                const tiktokRegex = /(?:tiktok\.com)\/@?([^\/\?]+)/i;
+                for (const link of links) {
+                    const match = link.match(tiktokRegex);
+                    if (match && !social.tiktok) {
+                        social.tiktok = link;
+                        break;
+                    }
                 }
                 
-                // LinkedIn patterns
-                const linkedinPattern = /(?:https?:\/\/)?(?:www\.)?linkedin\.com\/in\/([a-zA-Z0-9-]+)/gi;
-                const linkedinMatch = description.match(linkedinPattern);
-                if (linkedinMatch) {
-                    social.linkedin = linkedinMatch[0];
+                // LinkedIn detection
+                const linkedinRegex = /(?:linkedin\.com\/(?:in|company)\/[^\/\?]+)/i;
+                for (const link of links) {
+                    const match = link.match(linkedinRegex);
+                    if (match && !social.linkedin) {
+                        social.linkedin = link;
+                        break;
+                    }
                 }
                 
                 return social;
+            }
+
+            findWebsite(links, socialMedia) {
+                // Collect all social media links to exclude
+                const socialLinks = Object.values(socialMedia).filter(link => link);
+                
+                // Common social media and video platforms to exclude
+                const excludeDomains = [
+                    'youtube.com', 'youtu.be', 'twitter.com', 'x.com', 
+                    'facebook.com', 'fb.com', 'instagram.com', 'tiktok.com', 
+                    'linkedin.com', 'pinterest.com', 'reddit.com', 'tumblr.com',
+                    'snapchat.com', 'twitch.tv', 'vimeo.com', 'dailymotion.com',
+                    'patreon.com', 'ko-fi.com', 'buymeacoffee.com', 'gofundme.com',
+                    'discord.gg', 'discord.com', 'telegram.me', 't.me'
+                ];
+                
+                // Find first link that's not a social media platform
+                for (const link of links) {
+                    // Skip if this link is in our social media results
+                    if (socialLinks.includes(link)) continue;
+                    
+                    // Skip common social platforms
+                    const isExcluded = excludeDomains.some(domain => 
+                        link.toLowerCase().includes(domain)
+                    );
+                    
+                    if (!isExcluded) {
+                        return link;
+                    }
+                }
+                
+                return '';
             }
 
             analyzeMonetization(description, status) {
