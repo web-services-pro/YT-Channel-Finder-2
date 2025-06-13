@@ -283,6 +283,49 @@
             border: 1px solid #f5c6cb;
         }
 
+        .social-links {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+
+        .social-link {
+            color: #667eea;
+            text-decoration: none;
+            font-size: 0.85rem;
+            padding: 2px 6px;
+            border-radius: 4px;
+            background: #f0f2ff;
+        }
+
+        .social-link:hover {
+            background: #e0e6ff;
+        }
+
+        .recent-video {
+            font-size: 0.9rem;
+            max-width: 250px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .recent-video a {
+            color: #667eea;
+            text-decoration: none;
+        }
+
+        .recent-video a:hover {
+            text-decoration: underline;
+        }
+
+        .recent-video-date {
+            font-size: 0.8rem;
+            color: #888;
+            display: block;
+            margin-top: 3px;
+        }
+
         @media (max-width: 768px) {
             .header h1 { font-size: 2rem; }
             .form-grid { grid-template-columns: 1fr; }
@@ -290,6 +333,7 @@
             .results-header { flex-direction: column; align-items: stretch; }
             .results-table { font-size: 0.9rem; }
             th, td { padding: 10px; }
+            .social-links { flex-direction: column; }
         }
     </style>
 </head>
@@ -372,7 +416,10 @@
                             <th>Subscribers</th>
                             <th>Engagement Rate</th>
                             <th>Audience Match</th>
+                            <th>Recent Video</th>
                             <th>Contact</th>
+                            <th>Social Media</th>
+                            <th>Monetization</th>
                         </tr>
                     </thead>
                     <tbody id="resultsBody">
@@ -486,15 +533,19 @@
                 this.updateProgress(50, 'Analyzing engagement rates...');
                 const engagedChannels = await this.analyzeEngagement(rawChannels, formData.youtubeApiKey, formData.minEngagement);
                 
-                // Step 4: Collect contact info (70-90%)
+                // Step 4: Collect contact info (70-80%)
                 this.updateProgress(70, 'Collecting contact information...');
                 const contactChannels = await this.collectContactInfo(engagedChannels, formData.youtubeApiKey);
                 
-                // Step 5: Analyze audience match (90-95%)
-                this.updateProgress(90, 'Analyzing audience match...');
-                const matchedChannels = await this.analyzeAudienceMatch(contactChannels, formData.targetAudience, formData.openaiApiKey);
+                // Step 5: Get recent videos (80-90%)
+                this.updateProgress(80, 'Fetching recent videos...');
+                const channelsWithVideos = await this.getRecentVideos(contactChannels, formData.youtubeApiKey);
                 
-                // Step 6: Finalize results (95-100%)
+                // Step 6: Analyze audience match (90-95%)
+                this.updateProgress(90, 'Analyzing audience match...');
+                const matchedChannels = await this.analyzeAudienceMatch(channelsWithVideos, formData.targetAudience, formData.openaiApiKey);
+                
+                // Step 7: Finalize results (95-100%)
                 this.updateProgress(95, 'Preparing results...');
                 this.foundChannels = matchedChannels.slice(0, formData.channelCount);
                 
@@ -685,7 +736,7 @@
 
             async collectContactInfo(channels, apiKey) {
                 const contactChannels = [];
-                const progressStep = 20 / channels.length;
+                const progressStep = 10 / channels.length;
                 
                 for (let i = 0; i < channels.length; i++) {
                     const channel = channels[i];
@@ -694,15 +745,24 @@
                     try {
                         const contactInfo = await this.extractContactInfo(channel.id, apiKey);
                         
-                        if (contactInfo.email || contactInfo.website) {
-                            channel.contactEmail = contactInfo.email || '';
-                            channel.website = contactInfo.website || '';
+                        // Add all contact info to channel
+                        Object.assign(channel, contactInfo);
+                        
+                        // Include channel if it has any contact info
+                        if (contactInfo.email || contactInfo.website || contactInfo.instagram || 
+                            contactInfo.twitter || contactInfo.facebook || contactInfo.tiktok || 
+                            contactInfo.linkedin) {
+                            contactChannels.push(channel);
+                        } else {
+                            // Include channel even without contact info
                             contactChannels.push(channel);
                         }
                         
                         await this.delay(100); // Rate limiting
                     } catch (error) {
                         console.warn(`Failed to collect contact info for ${channel.name}:`, error.message);
+                        // Still include the channel even if contact info collection fails
+                        contactChannels.push(channel);
                     }
                 }
                 
@@ -724,29 +784,204 @@
                 
                 const description = channel.snippet.description || '';
                 const brandingSettings = channel.brandingSettings || {};
+                const status = channel.status || {};
                 
-                // Extract email from description
-                const emailRegex = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g;
-                const emailMatch = description.match(emailRegex);
+                // Extract email from description with improved regex
+                const emailRegex = /\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b/g;
+                const emailMatches = description.match(emailRegex);
+                const email = emailMatches ? emailMatches[0] : '';
                 
-                // Extract website from various sources
+                // Extract website URLs with improved regex
+                const urlRegex = /https?:\/\/(?:[-\w.])+(?:\:[0-9]+)?(?:\/(?:[\w\/_.])*(?:\?(?:[\w&=%.])*)?(?:\#(?:[\w.])*)?)?/g;
+                const urlMatches = description.match(urlRegex);
+                
+                // Filter out social media URLs for website field
                 let website = '';
-                if (brandingSettings.channel?.unsubscribedTrailer) {
-                    website = brandingSettings.channel.unsubscribedTrailer;
+                if (urlMatches) {
+                    const socialDomains = ['instagram.com', 'twitter.com', 'facebook.com', 'tiktok.com', 'linkedin.com', 'youtube.com', 'youtu.be'];
+                    for (const url of urlMatches) {
+                        const isSocial = socialDomains.some(domain => url.toLowerCase().includes(domain));
+                        if (!isSocial) {
+                            website = url;
+                            break;
+                        }
+                    }
                 }
                 
-                // Look for website in description
-                const urlRegex = /https?:\/\/(www\.)?[-a-zA-Z0-9@:%._\+~#=]{1,256}\.[a-zA-Z0-9()]{1,6}\b([-a-zA-Z0-9()@:%_\+.~#?&//=]*)/g;
-                const urlMatch = description.match(urlRegex);
+                // Extract social media links
+                const socialMedia = this.extractSocialMedia(description);
                 
-                if (urlMatch && !website) {
-                    website = urlMatch[0];
-                }
+                // Check monetization status
+                const monetization = this.analyzeMonetization(description, status);
                 
                 return {
-                    email: emailMatch ? emailMatch[0] : '',
-                    website: website
+                    email: email,
+                    website: website,
+                    instagram: socialMedia.instagram,
+                    twitter: socialMedia.twitter,
+                    facebook: socialMedia.facebook,
+                    tiktok: socialMedia.tiktok,
+                    linkedin: socialMedia.linkedin,
+                    monetization: monetization
                 };
+            }
+
+            extractSocialMedia(description) {
+                const social = {
+                    instagram: '',
+                    twitter: '',
+                    facebook: '',
+                    tiktok: '',
+                    linkedin: ''
+                };
+                
+                // Instagram patterns
+                const igPatterns = [
+                    /(?:https?:\/\/)?(?:www\.)?instagram\.com\/([a-zA-Z0-9_.]+)/gi,
+                    /(?:^|\s)@([a-zA-Z0-9_.]+)(?=\s|$)/gi,
+                    /IG:\s*@?([a-zA-Z0-9_.]+)/gi
+                ];
+                
+                for (const pattern of igPatterns) {
+                    const match = description.match(pattern);
+                    if (match && !social.instagram) {
+                        if (pattern.source.includes('instagram.com')) {
+                            social.instagram = match[0];
+                        } else {
+                            const username = match[0].replace(/[@\s:IG]/g, '');
+                            if (username.length > 2) {
+                                social.instagram = `https://instagram.com/${username}`;
+                            }
+                        }
+                        break;
+                    }
+                }
+                
+                // Twitter/X patterns
+                const twitterPatterns = [
+                    /(?:https?:\/\/)?(?:www\.)?(?:twitter\.com|x\.com)\/([a-zA-Z0-9_]+)/gi,
+                    /(?:Twitter|X):\s*@?([a-zA-Z0-9_]+)/gi
+                ];
+                
+                for (const pattern of twitterPatterns) {
+                    const match = description.match(pattern);
+                    if (match && !social.twitter) {
+                        if (pattern.source.includes('twitter.com') || pattern.source.includes('x.com')) {
+                            social.twitter = match[0];
+                        } else {
+                            const username = match[0].replace(/[Twitter:X@\s]/g, '');
+                            if (username.length > 2) {
+                                social.twitter = `https://twitter.com/${username}`;
+                            }
+                        }
+                        break;
+                    }
+                }
+                
+                // Facebook patterns
+                const fbPattern = /(?:https?:\/\/)?(?:www\.)?facebook\.com\/([a-zA-Z0-9_.]+)/gi;
+                const fbMatch = description.match(fbPattern);
+                if (fbMatch) {
+                    social.facebook = fbMatch[0];
+                }
+                
+                // TikTok patterns
+                const tiktokPattern = /(?:https?:\/\/)?(?:www\.)?tiktok\.com\/@?([a-zA-Z0-9_.]+)/gi;
+                const tiktokMatch = description.match(tiktokPattern);
+                if (tiktokMatch) {
+                    social.tiktok = tiktokMatch[0];
+                }
+                
+                // LinkedIn patterns
+                const linkedinPattern = /(?:https?:\/\/)?(?:www\.)?linkedin\.com\/in\/([a-zA-Z0-9-]+)/gi;
+                const linkedinMatch = description.match(linkedinPattern);
+                if (linkedinMatch) {
+                    social.linkedin = linkedinMatch[0];
+                }
+                
+                return social;
+            }
+
+            analyzeMonetization(description, status) {
+                const monetizationTypes = [];
+                const descLower = description.toLowerCase();
+                
+                // Check for various monetization indicators
+                if (descLower.includes('sponsor') || descLower.includes('partnership') || descLower.includes('affiliate')) {
+                    monetizationTypes.push('Sponsorships/Affiliates');
+                }
+                
+                if (descLower.includes('patreon') || descLower.includes('ko-fi') || descLower.includes('buymeacoffee')) {
+                    monetizationTypes.push('Crowdfunding');
+                }
+                
+                if (descLower.includes('merch') || descLower.includes('shop') || descLower.includes('store')) {
+                    monetizationTypes.push('Merchandise');
+                }
+                
+                if (descLower.includes('course') || descLower.includes('coaching') || descLower.includes('consultation')) {
+                    monetizationTypes.push('Courses/Coaching');
+                }
+                
+                if (descLower.includes('onlyfans') || descLower.includes('premium content')) {
+                    monetizationTypes.push('Premium Content');
+                }
+                
+                if (descLower.includes('twitch') || descLower.includes('stream') || descLower.includes('donation')) {
+                    monetizationTypes.push('Live Streaming');
+                }
+                
+                // Check YouTube monetization status
+                if (status.monetizationDetails || descLower.includes('ad revenue')) {
+                    monetizationTypes.push('YouTube Ads');
+                }
+                
+                return monetizationTypes.length > 0 ? monetizationTypes.join(', ') : 'Unknown';
+            }
+
+            async getRecentVideos(channels, apiKey) {
+                const progressStep = 10 / channels.length;
+                
+                for (let i = 0; i < channels.length; i++) {
+                    const channel = channels[i];
+                    this.updateProgress(80 + (i * progressStep), `Fetching recent videos for ${channel.name}...`);
+                    
+                    try {
+                        // Get recent videos from the last 30 days
+                        const thirtyDaysAgo = new Date();
+                        thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+                        const thirtyDaysAgoISO = thirtyDaysAgo.toISOString();
+                        
+                        const videosUrl = `https://www.googleapis.com/youtube/v3/search?part=snippet&channelId=${channel.id}&type=video&order=date&publishedAfter=${thirtyDaysAgoISO}&maxResults=5&key=${apiKey}`;
+                        
+                        const response = await fetch(videosUrl);
+                        if (!response.ok) {
+                            throw new Error(`YouTube API error: ${response.status}`);
+                        }
+                        
+                        const data = await response.json();
+                        const videos = data.items || [];
+                        
+                        if (videos.length > 0) {
+                            const recentVideo = videos[0];
+                            channel.recentVideo = {
+                                id: recentVideo.id.videoId,
+                                title: recentVideo.snippet.title,
+                                publishedAt: recentVideo.snippet.publishedAt,
+                                url: `https://www.youtube.com/watch?v=${recentVideo.id.videoId}`
+                            };
+                        } else {
+                            channel.recentVideo = null;
+                        }
+                        
+                        await this.delay(100); // Rate limiting
+                    } catch (error) {
+                        console.warn(`Failed to fetch recent videos for ${channel.name}:`, error.message);
+                        channel.recentVideo = null;
+                    }
+                }
+                
+                return channels;
             }
 
             async analyzeAudienceMatch(channels, targetAudience, openaiApiKey) {
@@ -835,6 +1070,43 @@
                 
                 this.foundChannels.forEach(channel => {
                     const row = document.createElement('tr');
+                    
+                    // Format recent video
+                    let recentVideoHtml = 'No recent videos';
+                    if (channel.recentVideo) {
+                        const publishedDate = new Date(channel.recentVideo.publishedAt).toLocaleDateString();
+                        recentVideoHtml = `
+                            <div class="recent-video">
+                                <a href="${channel.recentVideo.url}" target="_blank" title="${this.escapeHtml(channel.recentVideo.title)}">
+                                    ${this.escapeHtml(this.truncateText(channel.recentVideo.title, 40))}
+                                </a>
+                                <span class="recent-video-date">${publishedDate}</span>
+                            </div>
+                        `;
+                    }
+                    
+                    // Format social media links
+                    let socialLinksHtml = 'None';
+                    const socialLinks = [];
+                    
+                    if (channel.instagram) socialLinks.push(`<a href="${channel.instagram}" target="_blank" class="social-link">Instagram</a>`);
+                    if (channel.twitter) socialLinks.push(`<a href="${channel.twitter}" target="_blank" class="social-link">Twitter</a>`);
+                    if (channel.facebook) socialLinks.push(`<a href="${channel.facebook}" target="_blank" class="social-link">Facebook</a>`);
+                    if (channel.tiktok) socialLinks.push(`<a href="${channel.tiktok}" target="_blank" class="social-link">TikTok</a>`);
+                    if (channel.linkedin) socialLinks.push(`<a href="${channel.linkedin}" target="_blank" class="social-link">LinkedIn</a>`);
+                    
+                    if (socialLinks.length > 0) {
+                        socialLinksHtml = `<div class="social-links">${socialLinks.join('')}</div>`;
+                    }
+                    
+                    // Format contact info
+                    let contactHtml = 'N/A';
+                    if (channel.email) {
+                        contactHtml = `<a href="mailto:${channel.email}">${this.escapeHtml(channel.email)}</a>`;
+                    } else if (channel.website) {
+                        contactHtml = `<a href="${channel.website}" target="_blank">Website</a>`;
+                    }
+                    
                     row.innerHTML = `
                         <td>
                             <a href="${channel.url}" target="_blank" class="channel-name">
@@ -853,11 +1125,25 @@
                             </span>
                         </td>
                         <td>
-                            ${channel.contactEmail ? `<a href="mailto:${channel.contactEmail}">${this.escapeHtml(channel.contactEmail)}</a>` : 'N/A'}
+                            ${recentVideoHtml}
+                        </td>
+                        <td>
+                            ${contactHtml}
+                        </td>
+                        <td>
+                            ${socialLinksHtml}
+                        </td>
+                        <td>
+                            ${channel.monetization || 'Unknown'}
                         </td>
                     `;
                     tbody.appendChild(row);
                 });
+            }
+
+            truncateText(text, maxLength) {
+                if (text.length <= maxLength) return text;
+                return text.substring(0, maxLength) + '...';
             }
 
             getMatchClass(match) {
@@ -891,8 +1177,17 @@
                     'Subscribers',
                     'Engagement Rate (%)',
                     'Target Audience Match',
+                    'Recent Video Title',
+                    'Recent Video URL',
+                    'Recent Video Date',
                     'Contact Email',
                     'Website',
+                    'Instagram',
+                    'Twitter',
+                    'Facebook',
+                    'TikTok',
+                    'LinkedIn',
+                    'Monetization',
                     'Description'
                 ];
                 
@@ -904,8 +1199,17 @@
                         channel.subscribers,
                         channel.engagementRate.toFixed(2),
                         channel.audienceMatch,
-                        channel.contactEmail || '',
+                        channel.recentVideo ? `"${channel.recentVideo.title.replace(/"/g, '""')}"` : '',
+                        channel.recentVideo ? channel.recentVideo.url : '',
+                        channel.recentVideo ? channel.recentVideo.publishedAt : '',
+                        channel.email || '',
                         channel.website || '',
+                        channel.instagram || '',
+                        channel.twitter || '',
+                        channel.facebook || '',
+                        channel.tiktok || '',
+                        channel.linkedin || '',
+                        `"${(channel.monetization || 'Unknown').replace(/"/g, '""')}"`,
                         `"${(channel.description || '').replace(/"/g, '""').substring(0, 200)}"`
                     ].join(','))
                 ].join('\n');
