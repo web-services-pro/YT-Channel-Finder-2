@@ -784,14 +784,14 @@
                 const emailMatches = description.match(emailRegex);
                 const email = emailMatches ? emailMatches[0] : '';
                 
-                // Extract all links from description
-                const allLinks = this.extractAllLinks(description);
+                // Enhanced link extraction that specifically targets the LINKS section
+                const links = this.extractLinksFromDescription(description);
                 
                 // Categorize links
-                const socialMedia = this.categorizeSocialMedia(allLinks);
+                const socialMedia = this.categorizeSocialMedia(links);
                 
                 // Find website (non-social media links)
-                const website = this.findWebsite(allLinks, socialMedia);
+                const website = this.findWebsite(links, socialMedia);
                 
                 // Check monetization status
                 const monetization = this.analyzeMonetization(description, status);
@@ -808,8 +808,54 @@
                 };
             }
 
+            extractLinksFromDescription(description) {
+                // First, check if there's a dedicated LINKS section
+                const allLinks = [];
+                
+                // Method 1: Look for a dedicated "LINKS" section
+                const linksSection = this.extractLinksSectionContent(description);
+                if (linksSection) {
+                    // Extract URLs from the LINKS section with a more permissive pattern
+                    const linksSectionUrls = this.extractAllLinks(linksSection);
+                    allLinks.push(...linksSectionUrls);
+                }
+                
+                // Method 2: Extract all URLs from the entire description
+                // This catches links that might not be in a dedicated section
+                const allDescriptionUrls = this.extractAllLinks(description);
+                
+                // Combine all unique URLs
+                const uniqueUrls = new Set([...allLinks, ...allDescriptionUrls]);
+                return Array.from(uniqueUrls);
+            }
+            
+            extractLinksSectionContent(description) {
+                // Common patterns for LINKS sections in YouTube descriptions
+                const linksSectionPatterns = [
+                    /LINKS?:?([\s\S]*?)(?:\n\s*\n|\n[A-Z][A-Z\s]+:|\Z)/i,
+                    /SOCIAL MEDIA:?([\s\S]*?)(?:\n\s*\n|\n[A-Z][A-Z\s]+:|\Z)/i,
+                    /FOLLOW ME:?([\s\S]*?)(?:\n\s*\n|\n[A-Z][A-Z\s]+:|\Z)/i,
+                    /CONNECT:?([\s\S]*?)(?:\n\s*\n|\n[A-Z][A-Z\s]+:|\Z)/i,
+                    /CONNECT WITH [^:]*:?([\s\S]*?)(?:\n\s*\n|\n[A-Z][A-Z\s]+:|\Z)/i,
+                    /FIND ME:?([\s\S]*?)(?:\n\s*\n|\n[A-Z][A-Z\s]+:|\Z)/i
+                ];
+                
+                // Try each pattern
+                for (const pattern of linksSectionPatterns) {
+                    const match = description.match(pattern);
+                    if (match && match[1]) {
+                        return match[1].trim();
+                    }
+                }
+                
+                return null;
+            }
+
             extractAllLinks(text) {
-                // Comprehensive URL extraction
+                if (!text) return [];
+                
+                // Comprehensive URL extraction with improved pattern
+                // This pattern catches URLs with or without protocol, with various TLDs
                 const urlRegex = /(?:https?:\/\/)?(?:www\.)?[-a-zA-Z0-9@:%._\+~#=]{1,256}\.[a-zA-Z0-9()]{1,6}\b(?:[-a-zA-Z0-9()@:%_\+.~#?&//=]*)/gi;
                 const matches = text.match(urlRegex) || [];
                 
@@ -832,8 +878,8 @@
                     linkedin: ''
                 };
                 
-                // Instagram detection
-                const instagramRegex = /(?:instagram\.com|instagr\.am)\/([^\/\?]+)/i;
+                // Instagram detection (improved to catch variations)
+                const instagramRegex = /(?:instagram\.com|instagr\.am|ig\.me)\/([^\/\?]+)/i;
                 for (const link of links) {
                     const match = link.match(instagramRegex);
                     if (match && !social.instagram) {
@@ -842,7 +888,7 @@
                     }
                 }
                 
-                // Twitter/X detection
+                // Twitter/X detection (improved to catch both twitter.com and x.com)
                 const twitterRegex = /(?:twitter\.com|x\.com)\/([^\/\?]+)/i;
                 for (const link of links) {
                     const match = link.match(twitterRegex);
@@ -852,7 +898,7 @@
                     }
                 }
                 
-                // Facebook detection
+                // Facebook detection (improved to catch more variations)
                 const facebookRegex = /(?:facebook\.com|fb\.com|fb\.me)\/([^\/\?]+)/i;
                 for (const link of links) {
                     const match = link.match(facebookRegex);
@@ -863,7 +909,7 @@
                 }
                 
                 // TikTok detection
-                const tiktokRegex = /(?:tiktok\.com)\/@?([^\/\?]+)/i;
+                const tiktokRegex = /(?:tiktok\.com|vm\.tiktok\.com)\/@?([^\/\?]+)/i;
                 for (const link of links) {
                     const match = link.match(tiktokRegex);
                     if (match && !social.tiktok) {
@@ -872,8 +918,8 @@
                     }
                 }
                 
-                // LinkedIn detection
-                const linkedinRegex = /(?:linkedin\.com\/(?:in|company)\/[^\/\?]+)/i;
+                // LinkedIn detection (improved to catch both personal and company pages)
+                const linkedinRegex = /(?:linkedin\.com\/(?:in|company|school)\/[^\/\?]+)/i;
                 for (const link of links) {
                     const match = link.match(linkedinRegex);
                     if (match && !social.linkedin) {
