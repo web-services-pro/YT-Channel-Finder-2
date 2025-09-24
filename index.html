@@ -1138,16 +1138,26 @@
                 const brandingSettings = channel.brandingSettings || {};
                 const status = channel.status || {};
 
-                // Step 2: Fetch raw "About" page HTML
+                // Step 2: Fetch raw "About" page HTML (if not already cached in channel object)
                 let aboutHtml = '';
-                try {
-                    const aboutUrl = `/api/about-proxy?channelId=${channelId}`;
-                    const aboutResp = await fetch(aboutUrl);
-                    if (aboutResp.ok) {
-                        aboutHtml = await aboutResp.text();
+                if (this.foundChannels) {
+                    const existing = this.foundChannels.find(c => c.id === channelId && c.aboutHtml);
+                    if (existing && existing.aboutHtml) {
+                        // ✅ Reuse previously fetched About page
+                        aboutHtml = existing.aboutHtml;
                     }
-                } catch (err) {
-                    console.warn(`Failed to fetch About page for ${channelId}:`, err);
+                }
+
+                if (!aboutHtml) {
+                    try {
+                        const aboutUrl = `/api/about-proxy?channelId=${channelId}`;
+                        const aboutResp = await fetch(aboutUrl);
+                        if (aboutResp.ok) {
+                            aboutHtml = await aboutResp.text();
+                        }
+                    } catch (err) {
+                        console.warn(`Failed to fetch About page for ${channelId}:`, err);
+                    }
                 }
 
                 // Step 3: Use enhanced extractor on description + aboutHtml
@@ -1585,5 +1595,6 @@
     </script>
 </body>
 </html>
+
 
 
