@@ -578,7 +578,55 @@
                     }
                 }
 
-                return Array.from(urls);
+                // --- Filter unwanted YouTube/CDN/internal links ---
+                const allowedDomains = [
+                  "instagram.com",
+                  "facebook.com",
+                  "twitter.com",
+                  "x.com", // Twitter rebrand
+                  "tiktok.com",
+                  "linkedin.com",
+                  "discord.com",
+                  "twitch.tv",
+                  "patreon.com",
+                  "ko-fi.com",
+                  "buymeacoffee.com",
+                  "onlyfans.com",
+                  "substack.com",
+                  "medium.com",
+                  "github.com",
+                  "telegram.me",
+                  "t.me",
+                  "pinterest.com",
+                  "snapchat.com",
+                  "threads.net"
+                ];
+
+                function isAllowed(url) {
+                  try {
+                    const host = new URL(url).hostname.replace(/^www\./, "");
+                    // Block YouTube/Google/CDN
+                    if (
+                      host.endsWith("youtube.com") ||
+                      host.endsWith("ytimg.com") ||
+                      host.endsWith("googleusercontent.com") ||
+                      host.endsWith("ggpht.com")
+                    ) {
+                      return false;
+                    }
+                    // Allow listed social domains
+                    if (allowedDomains.some(domain => host.includes(domain))) {
+                      return true;
+                    }
+                    // ✅ Allow generic websites if not YouTube/CDN
+                    return true;
+                  } catch (e) {
+                    return false;
+                  }
+                }
+
+                return Array.from(urls).filter(isAllowed);
+
             }
 
             // Enhanced section detection
@@ -1385,21 +1433,59 @@
                         `;
                     }
                     
-                    // --- NEW: Social media links from About page ---
+                    // --- Social media + website links (filtered like CSV export) ---
                     let socialLinksHtml = 'None';
 
                     try {
                         const extractor = new EnhancedURLExtractor();
-
-                        // Use description + About JSON text if available
                         const allText = (channel.description || '') + (channel.aboutHtml || '');
                         const urls = extractor.extractAllURLs(allText);
 
-                        if (urls.length > 0) {
-                            const links = urls.map(url => {
-                                const hostname = new URL(url).hostname.replace("www.", "");
-                                return `<a href="${url}" target="_blank" class="social-link">${hostname}</a>`;
-                            });
+                        let website = '';
+                        const socials = {
+                            instagram: '',
+                            twitter: '',
+                            facebook: '',
+                            tiktok: '',
+                            linkedin: '',
+                            discord: '',
+                            twitch: '',
+                            patreon: '',
+                            kofi: ''
+                        };
+
+                        urls.forEach(url => {
+                            const host = new URL(url).hostname.replace(/^www\./, "");
+
+                            if (host.includes("instagram.com")) socials.instagram = url;
+                            else if (host.includes("twitter.com") || host === "x.com") socials.twitter = url;
+                            else if (host.includes("facebook.com")) socials.facebook = url;
+                            else if (host.includes("tiktok.com")) socials.tiktok = url;
+                            else if (host.includes("linkedin.com")) socials.linkedin = url;
+                            else if (host.includes("discord.com")) socials.discord = url;
+                            else if (host.includes("twitch.tv")) socials.twitch = url;
+                            else if (host.includes("patreon.com")) socials.patreon = url;
+                            else if (host.includes("ko-fi.com")) socials.kofi = url;
+                            else {
+                                // First non-social = website
+                                if (!website) website = url;
+                            }
+                        });
+
+                        const links = [];
+
+                        if (website) links.push(`<a href="${website}" target="_blank" class="social-link">Website</a>`);
+                        if (socials.instagram) links.push(`<a href="${socials.instagram}" target="_blank" class="social-link">Instagram</a>`);
+                        if (socials.twitter) links.push(`<a href="${socials.twitter}" target="_blank" class="social-link">Twitter</a>`);
+                        if (socials.facebook) links.push(`<a href="${socials.facebook}" target="_blank" class="social-link">Facebook</a>`);
+                        if (socials.tiktok) links.push(`<a href="${socials.tiktok}" target="_blank" class="social-link">TikTok</a>`);
+                        if (socials.linkedin) links.push(`<a href="${socials.linkedin}" target="_blank" class="social-link">LinkedIn</a>`);
+                        if (socials.discord) links.push(`<a href="${socials.discord}" target="_blank" class="social-link">Discord</a>`);
+                        if (socials.twitch) links.push(`<a href="${socials.twitch}" target="_blank" class="social-link">Twitch</a>`);
+                        if (socials.patreon) links.push(`<a href="${socials.patreon}" target="_blank" class="social-link">Patreon</a>`);
+                        if (socials.kofi) links.push(`<a href="${socials.kofi}" target="_blank" class="social-link">Ko-fi</a>`);
+
+                        if (links.length > 0) {
                             socialLinksHtml = `<div class="social-links">${links.join('')}</div>`;
                         }
                     } catch (err) {
@@ -1477,7 +1563,7 @@
                     this.showError('No channels to download');
                     return;
                 }
-                
+
                 const headers = [
                     'Channel Name',
                     'Channel URL',
@@ -1501,42 +1587,87 @@
                     'Monetization',
                     'Description'
                 ];
-                
+
+                const extractor = new EnhancedURLExtractor();
+
                 const csvContent = [
                     headers.join(','),
-                    ...this.foundChannels.map(channel => [
-                        `"${channel.name.replace(/"/g, '""')}"`,
-                        channel.url,
-                        channel.subscribers,
-                        channel.engagementRate.toFixed(2),
-                        channel.audienceMatch,
-                        channel.recentVideo ? `"${channel.recentVideo.title.replace(/"/g, '""')}"` : '',
-                        channel.recentVideo ? channel.recentVideo.url : '',
-                        channel.recentVideo ? channel.recentVideo.publishedAt : '',
-                        channel.email || '',
-                        channel.website || '',
-                        channel.instagram || '',
-                        channel.twitter || '',
-                        channel.facebook || '',
-                        channel.tiktok || '',
-                        channel.linkedin || '',
-                        channel.discord || '',
-                        channel.twitch || '',
-                        channel.patreon || '',
-                        channel.kofi || '',
-                        `"${(channel.monetization || 'Unknown').replace(/"/g, '""')}"`,
-                        `"${(channel.description || '').replace(/"/g, '""').substring(0, 200)}"`
-                    ].join(','))
+                    ...this.foundChannels.map(channel => {
+                        // --- Separate website vs socials ---
+                        let website = '';
+                        const socials = {
+                            instagram: '',
+                            twitter: '',
+                            facebook: '',
+                            tiktok: '',
+                            linkedin: '',
+                            discord: '',
+                            twitch: '',
+                            patreon: '',
+                            kofi: ''
+                        };
+
+                        // Run extractor on description + About HTML
+                        try {
+                            const allText = (channel.description || '') + '\n' + (channel.aboutHtml || '');
+                            const urls = extractor.extractAllURLs(allText);
+
+                            urls.forEach(url => {
+                                const host = new URL(url).hostname.replace(/^www\./, "");
+
+                                if (host.includes("instagram.com")) socials.instagram = url;
+                                else if (host.includes("twitter.com") || host === "x.com") socials.twitter = url;
+                                else if (host.includes("facebook.com")) socials.facebook = url;
+                                else if (host.includes("tiktok.com")) socials.tiktok = url;
+                                else if (host.includes("linkedin.com")) socials.linkedin = url;
+                                else if (host.includes("discord.com")) socials.discord = url;
+                                else if (host.includes("twitch.tv")) socials.twitch = url;
+                                else if (host.includes("patreon.com")) socials.patreon = url;
+                                else if (host.includes("ko-fi.com")) socials.kofi = url;
+                                else {
+                                    // First non-social = website
+                                    if (!website) website = url;
+                                }
+                            });
+                        } catch (err) {
+                            console.warn("CSV link extraction failed:", err);
+                        }
+
+                        // Build row
+                        return [
+                            `"${channel.name.replace(/"/g, '""')}"`,
+                            channel.url,
+                            channel.subscribers,
+                            channel.engagementRate.toFixed(2),
+                            channel.audienceMatch,
+                            channel.recentVideo ? `"${channel.recentVideo.title.replace(/"/g, '""')}"` : '',
+                            channel.recentVideo ? channel.recentVideo.url : '',
+                            channel.recentVideo ? channel.recentVideo.publishedAt : '',
+                            channel.email || '',
+                            website,
+                            socials.instagram,
+                            socials.twitter,
+                            socials.facebook,
+                            socials.tiktok,
+                            socials.linkedin,
+                            socials.discord,
+                            socials.twitch,
+                            socials.patreon,
+                            socials.kofi,
+                            `"${(channel.monetization || 'Unknown').replace(/"/g, '""')}"`,
+                            `"${(channel.description || '').replace(/"/g, '""').substring(0, 200)}"`
+                        ].join(',');
+                    })
                 ].join('\n');
-                
+
                 const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
                 const link = document.createElement('a');
                 const url = URL.createObjectURL(blob);
-                
+
                 link.setAttribute('href', url);
                 link.setAttribute('download', `youtube_channels_${new Date().toISOString().split('T')[0]}.csv`);
                 link.style.visibility = 'hidden';
-                
+
                 document.body.appendChild(link);
                 link.click();
                 document.body.removeChild(link);
@@ -1595,6 +1726,7 @@
     </script>
 </body>
 </html>
+
 
 
 
