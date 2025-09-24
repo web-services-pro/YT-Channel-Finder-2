@@ -1141,7 +1141,7 @@
                 // Step 2: Fetch raw "About" page HTML
                 let aboutHtml = '';
                 try {
-                    const aboutUrl = `https://www.youtube.com/channel/${channelId}/about`;
+                    const aboutUrl = `/api/about-proxy?channelId=${channelId}`;
                     const aboutResp = await fetch(aboutUrl);
                     if (aboutResp.ok) {
                         aboutHtml = await aboutResp.text();
@@ -1585,4 +1585,5 @@
     </script>
 </body>
 </html>
+
 
