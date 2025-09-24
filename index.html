@@ -539,62 +539,46 @@
                 ];
             }
 
-            // Enhanced URL extraction with better regex
+            // Enhanced URL extraction including YouTube About JSON
             extractAllURLs(text) {
                 if (!text) return [];
 
-                // Multiple URL patterns for better coverage
+                const urls = new Set();
+
+                try {
+                    // --- NEW: Extract from YouTube About JSON ---
+                    const jsonMatch = text.match(/ytInitial(Data|AboutResults)"?\s*=\s*({.*?});<\/script>/s);
+                    if (jsonMatch) {
+                        const data = JSON.parse(jsonMatch[2]);
+
+                        // Dig into JSON for links
+                        const jsonString = JSON.stringify(data);
+                        const matches = [...jsonString.matchAll(/"url":"(https?:\/\/[^"]+)"/g)];
+                        for (const m of matches) {
+                            urls.add(decodeURIComponent(m[1]));
+                        }
+                    }
+                } catch (err) {
+                    console.warn("About page JSON parse failed:", err);
+                }
+
+                // --- Existing regex fallback (for descriptions, comments, etc.) ---
                 const urlPatterns = [
-                    // Standard URL pattern (improved)
-                    /(?:https?:\/\/)?(?:www\.)?[-a-zA-Z0-9@:%._\+~#=]{1,256}\.[a-zA-Z0-9()]{1,6}\b(?:[-a-zA-Z0-9()@:%_\+.~#?&//=]*)/gi,
-                    
-                    // Social media specific patterns
-                    /@([a-zA-Z0-9._]+)/g, // Handle @username mentions
-                    
-                    // URLs in parentheses or brackets
-                    /\(([^)]*\.[a-zA-Z]{2,}[^)]*)\)/g,
-                    /\[([^\]]*\.[a-zA-Z]{2,}[^\]]*)\]/g,
-                    
-                    // URLs with markdown-like syntax
-                    /\[([^\]]+)\]\(([^)]+)\)/g // [text](url) format
+                    /https?:\/\/[^\s"'<>]+/gi,
+                    /www\.[^\s"'<>]+/gi
                 ];
 
-                const allMatches = new Set();
+                for (const pattern of urlPatterns) {
+                    const matches = text.match(pattern);
+                    if (matches) {
+                        matches.forEach(u => {
+                            if (!u.startsWith("http")) u = "https://" + u;
+                            urls.add(u);
+                        });
+                    }
+                }
 
-                urlPatterns.forEach(pattern => {
-                    const matches = text.match(pattern) || [];
-                    matches.forEach(match => {
-                        // Clean up the match
-                        let url = match.trim();
-                        
-                        // Handle markdown links
-                        const markdownMatch = url.match(/\[([^\]]+)\]\(([^)]+)\)/);
-                        if (markdownMatch) {
-                            url = markdownMatch[2];
-                        }
-
-                        // Handle parentheses/brackets
-                        if (url.startsWith('(') && url.endsWith(')') || 
-                            url.startsWith('[') && url.endsWith(']')) {
-                            url = url.slice(1, -1);
-                        }
-
-                        // Add protocol if missing
-                        if (url.includes('.') && !url.startsWith('http://') && !url.startsWith('https://')) {
-                            // Only add protocol if it looks like a real URL
-                            if (/^[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/.test(url)) {
-                                url = 'https://' + url;
-                            }
-                        }
-
-                        // Validate URL format
-                        if (this.isValidURL(url)) {
-                            allMatches.add(url);
-                        }
-                    });
-                });
-
-                return Array.from(allMatches);
+                return Array.from(urls);
             }
 
             // Enhanced section detection
