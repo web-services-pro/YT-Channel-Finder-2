@@ -376,8 +376,8 @@
                     </div>
                     
                     <div class="form-group">
-                        <label for="youtubeApiKey">YouTube Data API Key *</label>
-                        <input type="password" id="youtubeApiKey" placeholder="Your YouTube Data API v3 key" required>
+                        <label for="youtubeApiKey">YouTube Data API Key(s) *</label>
+                        <input type="password" id="youtubeApiKey" placeholder="Enter one or multiple keys, comma separated" required>
                     </div>
                     
                     <div class="form-group">
@@ -790,6 +790,14 @@
                 this.init();
             }
 
+            getNextApiKey() {
+                if (!this.apiKeys || this.apiKeys.length === 0) {
+                    throw new Error("No YouTube API keys provided");
+                }
+                this.apiKeyIndex = (this.apiKeyIndex + 1) % this.apiKeys.length;
+                return this.apiKeys[this.apiKeyIndex];
+            }
+
             init() {
                 // Load saved API keys
                 this.loadApiKeys();
@@ -837,7 +845,9 @@
                 
                 // Get form data
                 const formData = this.getFormData();
-                
+                this.apiKeys = formData.youtubeApiKeys;
+                this.apiKeyIndex = -1;
+              
                 // Show progress section
                 document.getElementById('progressSection').style.display = 'block';
                 document.getElementById('resultsSection').style.display = 'none';
@@ -861,7 +871,10 @@
                     maxSubscribers: parseInt(document.getElementById('maxSubscribers').value) || 1000000,
                     minEngagement: parseFloat(document.getElementById('minEngagement').value) || 2,
                     channelCount: parseInt(document.getElementById('channelCount').value) || 25,
-                    youtubeApiKey: document.getElementById('youtubeApiKey').value.trim(),
+                    youtubeApiKeys: document.getElementById('youtubeApiKey').value
+                        .split(',')
+                        .map(k => k.trim())
+                        .filter(k => k.length > 0),
                     openaiApiKey: document.getElementById('openaiApiKey').value.trim()
                 };
             }
@@ -958,7 +971,7 @@
                     this.updateProgress(10 + (i * progressStep), `Searching for "${query}"...`);
                     
                     try {
-                        const channels = await this.searchYouTubeChannels(query, apiKey);
+                        const channels = await this.searchYouTubeChannels(query, this.getNextApiKey());
                         
                         for (const channel of channels) {
                             const subCount = channel.statistics?.subscriberCount ? parseInt(channel.statistics.subscriberCount) : 0;
@@ -986,7 +999,7 @@
             }
 
             async searchYouTubeChannels(query, apiKey) {
-                const searchUrl = `https://www.googleapis.com/youtube/v3/search?part=snippet&type=channel&q=${encodeURIComponent(query)}&maxResults=25&key=${apiKey}`;
+                const searchUrl = `https://www.googleapis.com/youtube/v3/search?part=snippet&type=channel&q=${encodeURIComponent(query)}&maxResults=25&key=${this.getNextApiKey()}`;
                 
                 const response = await fetch(searchUrl);
                 if (!response.ok) {
@@ -999,7 +1012,7 @@
                 if (!channelIds) return [];
                 
                 // Get detailed channel info
-                const channelsUrl = `https://www.googleapis.com/youtube/v3/channels?part=snippet,statistics&id=${channelIds}&key=${apiKey}`;
+                const channelsUrl = `https://www.googleapis.com/youtube/v3/channels?part=snippet,statistics&id=${channelIds}&key=${this.getNextApiKey()}`;
                 const channelsResponse = await fetch(channelsUrl);
                 
                 if (!channelsResponse.ok) {
@@ -1019,7 +1032,7 @@
                     this.updateProgress(50 + (i * progressStep), `Analyzing ${channel.name}...`);
                     
                     try {
-                        const engagementRate = await this.calculateEngagementRate(channel.id, apiKey);
+                        const engagementRate = await this.calculateEngagementRate(channel.id, this.getNextApiKey());
                         
                         if (engagementRate >= minEngagement) {
                             channel.engagementRate = engagementRate;
@@ -1036,7 +1049,7 @@
             }
 
             async calculateEngagementRate(channelId, apiKey) {
-                const videosUrl = `https://www.googleapis.com/youtube/v3/search?part=snippet&channelId=${channelId}&type=video&order=date&maxResults=10&key=${apiKey}`;
+                const videosUrl = `https://www.googleapis.com/youtube/v3/search?part=snippet&channelId=${channelId}&type=video&order=date&maxResults=10&key=${this.getNextApiKey()}`;
                 
                 const response = await fetch(videosUrl);
                 if (!response.ok) {
@@ -1049,7 +1062,7 @@
                 if (!videoIds) return 0;
                 
                 // Get video statistics
-                const statsUrl = `https://www.googleapis.com/youtube/v3/videos?part=statistics&id=${videoIds}&key=${apiKey}`;
+                const statsUrl = `https://www.googleapis.com/youtube/v3/videos?part=statistics&id=${videoIds}&key=${this.getNextApiKey()}`;
                 const statsResponse = await fetch(statsUrl);
                 
                 if (!statsResponse.ok) {
@@ -1089,7 +1102,7 @@
                     this.updateProgress(70 + (i * progressStep), `Collecting contact info for ${channel.name}...`);
                     
                     try {
-                        const contactInfo = await this.extractContactInfo(channel.id, apiKey);
+                        const contactInfo = await this.extractContactInfo(channel.id, this.getNextApiKey());
                         
                         // Add all contact info to channel
                         Object.assign(channel, contactInfo);
@@ -1109,38 +1122,51 @@
             }
 
             async extractContactInfo(channelId, apiKey) {
-                const channelUrl = `https://www.googleapis.com/youtube/v3/channels?part=snippet,brandingSettings&id=${channelId}&key=${apiKey}`;
-                
+                // Step 1: Get standard channel info
+                const channelUrl = `https://www.googleapis.com/youtube/v3/channels?part=snippet,brandingSettings&id=${channelId}&key=${this.getNextApiKey()}`;
+    
                 const response = await fetch(channelUrl);
                 if (!response.ok) {
                     throw new Error(`YouTube API error: ${response.status}`);
                 }
-                
+    
                 const data = await response.json();
                 const channel = data.items[0];
-                
                 if (!channel) return {};
-                
+    
                 const description = channel.snippet.description || '';
                 const brandingSettings = channel.brandingSettings || {};
                 const status = channel.status || {};
-                
-                // Use the enhanced URL extractor
-                const extractionResult = this.urlExtractor.extractAllContactInfo(description);
-                
+
+                // Step 2: Fetch raw "About" page HTML
+                let aboutHtml = '';
+                try {
+                    const aboutUrl = `https://www.youtube.com/channel/${channelId}/about`;
+                    const aboutResp = await fetch(aboutUrl);
+                    if (aboutResp.ok) {
+                        aboutHtml = await aboutResp.text();
+                    }
+                } catch (err) {
+                    console.warn(`Failed to fetch About page for ${channelId}:`, err);
+                }
+
+                // Step 3: Use enhanced extractor on description + aboutHtml
+                const extractionResult = this.urlExtractor.extractAllContactInfo(description + '\n' + aboutHtml);
+
                 // Get the first email if available
                 const email = extractionResult.emails.length > 0 ? extractionResult.emails[0] : '';
-                
+    
                 // Get the first website if available
                 const website = extractionResult.websites.length > 0 ? extractionResult.websites[0] : '';
-                
+    
                 // Get social media links
                 const socialMedia = extractionResult.socialMedia;
-                
+    
                 // Check monetization status
                 const monetization = this.analyzeMonetization(description, status);
-                
+    
                 return {
+                    aboutHtml: aboutHtml,   // <-- store raw HTML for later
                     email: email,
                     website: website,
                     instagram: socialMedia.instagram || '',
@@ -1216,7 +1242,7 @@
                         thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
                         const thirtyDaysAgoISO = thirtyDaysAgo.toISOString();
                         
-                        const videosUrl = `https://www.googleapis.com/youtube/v3/search?part=snippet&channelId=${channel.id}&type=video&order=date&publishedAfter=${thirtyDaysAgoISO}&maxResults=5&key=${apiKey}`;
+                        const videosUrl = `https://www.googleapis.com/youtube/v3/search?part=snippet&channelId=${channel.id}&type=video&order=date&publishedAfter=${thirtyDaysAgoISO}&maxResults=5&key=${this.getNextApiKey()}`;
                         
                         const response = await fetch(videosUrl);
                         if (!response.ok) {
@@ -1349,24 +1375,27 @@
                         `;
                     }
                     
-                    // Format social media links
+                    // --- NEW: Social media links from About page ---
                     let socialLinksHtml = 'None';
-                    const socialLinks = [];
-                    
-                    if (channel.instagram) socialLinks.push(`<a href="${channel.instagram}" target="_blank" class="social-link">Instagram</a>`);
-                    if (channel.twitter) socialLinks.push(`<a href="${channel.twitter}" target="_blank" class="social-link">Twitter</a>`);
-                    if (channel.facebook) socialLinks.push(`<a href="${channel.facebook}" target="_blank" class="social-link">Facebook</a>`);
-                    if (channel.tiktok) socialLinks.push(`<a href="${channel.tiktok}" target="_blank" class="social-link">TikTok</a>`);
-                    if (channel.linkedin) socialLinks.push(`<a href="${channel.linkedin}" target="_blank" class="social-link">LinkedIn</a>`);
-                    if (channel.discord) socialLinks.push(`<a href="${channel.discord}" target="_blank" class="social-link">Discord</a>`);
-                    if (channel.twitch) socialLinks.push(`<a href="${channel.twitch}" target="_blank" class="social-link">Twitch</a>`);
-                    if (channel.patreon) socialLinks.push(`<a href="${channel.patreon}" target="_blank" class="social-link">Patreon</a>`);
-                    if (channel.kofi) socialLinks.push(`<a href="${channel.kofi}" target="_blank" class="social-link">Ko-fi</a>`);
-                    
-                    if (socialLinks.length > 0) {
-                        socialLinksHtml = `<div class="social-links">${socialLinks.join('')}</div>`;
+
+                    try {
+                        const extractor = new EnhancedURLExtractor();
+
+                        // Use description + About JSON text if available
+                        const allText = (channel.description || '') + (channel.aboutHtml || '');
+                        const urls = extractor.extractAllURLs(allText);
+
+                        if (urls.length > 0) {
+                            const links = urls.map(url => {
+                                const hostname = new URL(url).hostname.replace("www.", "");
+                                return `<a href="${url}" target="_blank" class="social-link">${hostname}</a>`;
+                            });
+                            socialLinksHtml = `<div class="social-links">${links.join('')}</div>`;
+                        }
+                    } catch (err) {
+                        console.warn("Failed to build social links:", err);
                     }
-                    
+                
                     // Format contact info
                     let contactHtml = 'N/A';
                     if (channel.email) {
@@ -1556,3 +1585,4 @@
     </script>
 </body>
 </html>
+
