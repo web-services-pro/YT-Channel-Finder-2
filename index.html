@@ -1220,8 +1220,8 @@
                 // Get social media links
                 const socialMedia = extractionResult.socialMedia;
     
-                // Check monetization status
-                const monetization = this.analyzeMonetization(description, status);
+                // Check monetization status (description + About + recent videos)
+                const monetization = this.analyzeMonetization(description, status, aboutHtml, channel.recentVideos || []);
     
                 return {
                     aboutHtml: aboutHtml,   // <-- store raw HTML for later
@@ -1250,85 +1250,105 @@
                 };
             }
 
-            analyzeMonetization(description, status) {
+            analyzeMonetization(description, status, aboutHtml = '', recentVideos = []) {
+                let combinedText = ((description || '') + ' ' + (aboutHtml || '')).toLowerCase();
+
+                // Add all recent video descriptions
+                for (const vid of recentVideos) {
+                    if (vid.description) {
+                        combinedText += ' ' + vid.description.toLowerCase();
+                    }
+                }
+
                 const monetizationTypes = [];
-                const descLower = description.toLowerCase();
-                
-                // Check for various monetization indicators
-                if (descLower.includes('sponsor') || descLower.includes('partnership') || descLower.includes('affiliate')) {
+
+                // Sponsorships / affiliates
+                if (combinedText.includes('sponsor') || combinedText.includes('partnership') || combinedText.includes('affiliate') || combinedText.includes('amazon.com')) {
                     monetizationTypes.push('Sponsorships/Affiliates');
                 }
-                
-                if (descLower.includes('patreon') || descLower.includes('ko-fi') || descLower.includes('buymeacoffee')) {
+
+                // Crowdfunding / memberships
+                if (combinedText.includes('patreon') || combinedText.includes('ko-fi') || combinedText.includes('buymeacoffee')) {
                     monetizationTypes.push('Crowdfunding');
                 }
-                
-                if (descLower.includes('merch') || descLower.includes('shop') || descLower.includes('store')) {
-                    monetizationTypes.push('Merchandise');
+                if (combinedText.includes('membership') || combinedText.includes('join channel')) {
+                    monetizationTypes.push('Memberships');
                 }
-                
-                if (descLower.includes('course') || descLower.includes('coaching') || descLower.includes('consultation')) {
-                    monetizationTypes.push('Courses/Coaching');
-                }
-                
-                if (descLower.includes('onlyfans') || descLower.includes('premium content')) {
+                if (combinedText.includes('onlyfans') || combinedText.includes('premium content')) {
                     monetizationTypes.push('Premium Content');
                 }
-                
-                if (descLower.includes('twitch') || descLower.includes('stream') || descLower.includes('donation')) {
+                if (combinedText.includes('substack')) {
+                    monetizationTypes.push('Substack');
+                }
+
+                // Merch / products
+                if (combinedText.includes('merch') || combinedText.includes('shop') || combinedText.includes('store')) {
+                    monetizationTypes.push('Merchandise');
+                }
+
+                // Courses / coaching / digital products
+                if (combinedText.includes('course') || combinedText.includes('coaching') || combinedText.includes('consultation') || combinedText.includes('training')) {
+                    monetizationTypes.push('Courses/Coaching');
+                }
+                if (combinedText.includes('ebook') || combinedText.includes('template') || combinedText.includes('download my')) {
+                    monetizationTypes.push('Digital Products');
+                }
+
+                // Streaming / donations
+                if (combinedText.includes('twitch') || combinedText.includes('stream') || combinedText.includes('donation')) {
                     monetizationTypes.push('Live Streaming');
                 }
-                
-                // Check YouTube monetization status
-                if (status.monetizationDetails || descLower.includes('ad revenue')) {
-                    monetizationTypes.push('YouTube Ads');
-                }
-                
-                return monetizationTypes.length > 0 ? monetizationTypes.join(', ') : 'Unknown';
+
+                return monetizationTypes.length > 0 ? [...new Set(monetizationTypes)].join(', ') : 'Unknown';
             }
 
             async getRecentVideos(channels, apiKey) {
                 const progressStep = 10 / channels.length;
-                
+    
                 for (let i = 0; i < channels.length; i++) {
                     const channel = channels[i];
                     this.updateProgress(80 + (i * progressStep), `Fetching recent videos for ${channel.name}...`);
-                    
+        
                     try {
                         // Get recent videos from the last 30 days
                         const thirtyDaysAgo = new Date();
                         thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
                         const thirtyDaysAgoISO = thirtyDaysAgo.toISOString();
-                        
+            
                         const videosUrl = `https://www.googleapis.com/youtube/v3/search?part=snippet&channelId=${channel.id}&type=video&order=date&publishedAfter=${thirtyDaysAgoISO}&maxResults=5&key=${this.getNextApiKey()}`;
-                        
+            
                         const response = await fetch(videosUrl);
                         if (!response.ok) {
                             throw new Error(`YouTube API error: ${response.status}`);
                         }
-                        
+            
                         const data = await response.json();
                         const videos = data.items || [];
-                        
+            
                         if (videos.length > 0) {
-                            const recentVideo = videos[0];
-                            channel.recentVideo = {
-                                id: recentVideo.id.videoId,
-                                title: recentVideo.snippet.title,
-                                publishedAt: recentVideo.snippet.publishedAt,
-                                url: `https://www.youtube.com/watch?v=${recentVideo.id.videoId}`
-                            };
+                            channel.recentVideos = videos.map(v => ({
+                                id: v.id.videoId,
+                                title: v.snippet.title,
+                                publishedAt: v.snippet.publishedAt,
+                                description: v.snippet.description || '',
+                                url: `https://www.youtube.com/watch?v=${v.id.videoId}`
+                            }));
+
+                            // keep first video for quick display
+                            channel.recentVideo = channel.recentVideos[0];
                         } else {
                             channel.recentVideo = null;
+                            channel.recentVideos = [];
                         }
-                        
+            
                         await this.delay(100); // Rate limiting
                     } catch (error) {
                         console.warn(`Failed to fetch recent videos for ${channel.name}:`, error.message);
                         channel.recentVideo = null;
+                        channel.recentVideos = [];
                     }
                 }
-                
+    
                 return channels;
             }
 
@@ -1654,7 +1674,12 @@
                             socials.twitch,
                             socials.patreon,
                             socials.kofi,
-                            `"${(channel.monetization || 'Unknown').replace(/"/g, '""')}"`,
+                            `"${(this.analyzeMonetization(
+                                channel.description || '',
+                                {},
+                                channel.aboutHtml || '',
+                                channel.recentVideos || []
+                            ) || 'Unknown').replace(/"/g, '""')}"`,
                             `"${(channel.description || '').replace(/"/g, '""').substring(0, 200)}"`
                         ].join(',');
                     })
@@ -1726,6 +1751,7 @@
     </script>
 </body>
 </html>
+
 
 
 
