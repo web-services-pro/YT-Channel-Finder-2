@@ -1170,88 +1170,99 @@
             }
 
             async extractContactInfo(channelId, apiKey) {
-                // Step 1: Get standard channel info
+                // Step 1: Get standard channel info (description, status, etc.)
                 const channelUrl = `https://www.googleapis.com/youtube/v3/channels?part=snippet,brandingSettings&id=${channelId}&key=${this.getNextApiKey()}`;
-    
+
                 const response = await fetch(channelUrl);
                 if (!response.ok) {
                     throw new Error(`YouTube API error: ${response.status}`);
                 }
-    
+
                 const data = await response.json();
                 const channel = data.items[0];
                 if (!channel) return {};
-    
+
                 const description = channel.snippet.description || '';
                 const brandingSettings = channel.brandingSettings || {};
                 const status = channel.status || {};
 
-                // Step 2: Fetch raw "About" page HTML (if not already cached in channel object)
-                let aboutHtml = '';
-                if (this.foundChannels) {
-                    const existing = this.foundChannels.find(c => c.id === channelId && c.aboutHtml);
-                    if (existing && existing.aboutHtml) {
-                        // ✅ Reuse previously fetched About page
-                        aboutHtml = existing.aboutHtml;
+                // Step 2: Call new Puppeteer API to scrape About page
+                let aboutData = {};
+                try {
+                    const scrapeResp = await fetch("/api/scrape-about", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ channelId })
+                    });
+
+                    if (scrapeResp.ok) {
+                        aboutData = await scrapeResp.json();
+                    } else {
+                        console.warn(`Failed to scrape About page for ${channelId}: ${scrapeResp.status}`);
                     }
+                } catch (err) {
+                    console.warn(`Error calling scrape-about for ${channelId}:`, err);
                 }
 
-                if (!aboutHtml) {
-                    try {
-                        const aboutUrl = `/api/about-proxy?channelId=${channelId}`;
-                        const aboutResp = await fetch(aboutUrl);
-                        if (aboutResp.ok) {
-                            aboutHtml = await aboutResp.text();
-                        }
-                    } catch (err) {
-                        console.warn(`Failed to fetch About page for ${channelId}:`, err);
-                    }
-                }
+                // Emails (take first if multiple)
+                const email = (aboutData.emails && aboutData.emails.length > 0) ? aboutData.emails[0] : '';
 
-                // Step 3: Use enhanced extractor on description + aboutHtml
-                const extractionResult = this.urlExtractor.extractAllContactInfo(description + '\n' + aboutHtml);
+                // Websites (take first if multiple)
+                const website = (aboutData.websites && aboutData.websites.length > 0) ? aboutData.websites[0] : '';
 
-                // Get the first email if available
-                const email = extractionResult.emails.length > 0 ? extractionResult.emails[0] : '';
-    
-                // Get the first website if available
-                const website = extractionResult.websites.length > 0 ? extractionResult.websites[0] : '';
-    
-                // Get social media links
-                const socialMedia = extractionResult.socialMedia;
-    
-                // Check monetization status (description + About + recent videos)
-                const monetization = this.analyzeMonetization(description, status, aboutHtml, channel.recentVideos || []);
-    
+                // Social links
+                const socials = aboutData.socials || {};
+
+                // Step 3: Check monetization (scan description + About links + video descriptions)
+                const monetization = this.analyzeMonetization(
+                    description,
+                    status,
+                    JSON.stringify(aboutData),   // pass structured aboutData instead of raw HTML
+                    channel.recentVideos || []
+                );
+
                 return {
-                    aboutHtml: aboutHtml,   // <-- store raw HTML for later
+                    aboutHtml: JSON.stringify(aboutData),   // store JSON for later
                     email: email,
                     website: website,
-                    instagram: socialMedia.instagram || '',
-                    twitter: socialMedia.twitter || '',
-                    facebook: socialMedia.facebook || '',
-                    tiktok: socialMedia.tiktok || '',
-                    linkedin: socialMedia.linkedin || '',
-                    patreon: socialMedia.patreon || '',
-                    kofi: socialMedia.kofi || '',
-                    buymeacoffee: socialMedia.buymeacoffee || '',
-                    discord: socialMedia.discord || '',
-                    twitch: socialMedia.twitch || '',
-                    reddit: socialMedia.reddit || '',
-                    pinterest: socialMedia.pinterest || '',
-                    snapchat: socialMedia.snapchat || '',
-                    threads: socialMedia.threads || '',
-                    onlyfans: socialMedia.onlyfans || '',
-                    substack: socialMedia.substack || '',
-                    medium: socialMedia.medium || '',
-                    github: socialMedia.github || '',
-                    telegram: socialMedia.telegram || '',
+                    instagram: socials.instagram || '',
+                    twitter: socials.twitter || '',
+                    facebook: socials.facebook || '',
+                    tiktok: socials.tiktok || '',
+                    linkedin: socials.linkedin || '',
+                    patreon: socials.patreon || '',
+                    kofi: socials.kofi || '',
+                    buymeacoffee: socials.buymeacoffee || '',
+                    discord: socials.discord || '',
+                    twitch: socials.twitch || '',
+                    reddit: socials.reddit || '',
+                    pinterest: socials.pinterest || '',
+                    snapchat: socials.snapchat || '',
+                    threads: socials.threads || '',
+                    onlyfans: socials.onlyfans || '',
+                    substack: socials.substack || '',
+                    medium: socials.medium || '',
+                    github: socials.github || '',
+                    telegram: socials.telegram || '',
                     monetization: monetization
                 };
             }
 
-            analyzeMonetization(description, status, aboutHtml = '', recentVideos = []) {
-                let combinedText = ((description || '') + ' ' + (aboutHtml || '')).toLowerCase();
+            analyzeMonetization(description, status, aboutData = {}, recentVideos = []) {
+                let combinedText = (description || '').toLowerCase();
+
+                // Add About section websites + socials
+                if (aboutData.websites) {
+                    combinedText += ' ' + aboutData.websites.join(' ').toLowerCase();
+                }
+                if (aboutData.socials) {
+                    combinedText += ' ' + Object.values(aboutData.socials).join(' ').toLowerCase();
+                }
+
+                // Add emails too (sometimes monetization clues appear in them)
+                if (aboutData.emails) {
+                    combinedText += ' ' + aboutData.emails.join(' ').toLowerCase();
+                }
 
                 // Add all recent video descriptions
                 for (const vid of recentVideos) {
@@ -1751,6 +1762,7 @@
     </script>
 </body>
 </html>
+
 
 
 
