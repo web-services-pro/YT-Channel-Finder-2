@@ -20,52 +20,101 @@ app.get("/api/health", (req, res) => {
   res.json({ status: "ok", message: "Server is running 🚀" });
 });
 
-// Utility: extract contacts from page HTML
-function extractContactInfo(html) {
-  const emails = [];
-  const websites = [];
-  const socialMedia = {};
+// --- Enhanced extractor run inside page.evaluate ---
+async function extractContactInfoFromPage(page) {
+  const result = await page.evaluate(() => {
+    const uniq = arr => [...new Set(arr.filter(Boolean))];
 
-  // --- Email regex ---
-  const emailRegex =
-    /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g;
-  const foundEmails = html.match(emailRegex) || [];
-  foundEmails.forEach((e) => {
-    if (!emails.includes(e.toLowerCase())) {
-      emails.push(e.toLowerCase());
-    }
-  });
+    // --- Emails ---
+    const emailRegex =
+      /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g;
+    const pageText = document.body ? document.body.innerText : "";
+    const emails = (pageText.match(emailRegex) || []).map(e => e.toLowerCase());
 
-  // --- Links parsing ---
-  const linkRegex = /https?:\/\/[^\s"']+/g;
-  const links = html.match(linkRegex) || [];
+    // --- Anchors ---
+    const anchors = Array.from(document.querySelectorAll("a[href]"))
+      .map(a => a.href)
+      .filter(Boolean);
 
-  links.forEach((href) => {
-    const url = href.toLowerCase();
+    // --- JSON-LD blocks ---
+    const jsonLd = Array.from(
+      document.querySelectorAll('script[type="application/ld+json"]')
+    )
+      .map(s => {
+        try {
+          return JSON.parse(s.textContent);
+        } catch {
+          return null;
+        }
+      })
+      .filter(Boolean);
 
-    if (url.includes("instagram.com")) socialMedia.instagram = href;
-    else if (url.includes("twitter.com") || url.includes("x.com"))
-      socialMedia.twitter = href;
-    else if (url.includes("facebook.com")) socialMedia.facebook = href;
-    else if (url.includes("tiktok.com")) socialMedia.tiktok = href;
-    else if (url.includes("linkedin.com")) socialMedia.linkedin = href;
-    else if (url.includes("patreon.com")) socialMedia.patreon = href;
-    else if (url.includes("ko-fi.com")) socialMedia.kofi = href;
-    else if (url.includes("discord.gg")) socialMedia.discord = href;
-    else if (url.includes("twitch.tv")) socialMedia.twitch = href;
-    else {
-      // treat as a "website" if not YouTube/social
-      if (
-        !url.includes("youtube.com") &&
-        !url.includes("youtu.be") &&
-        !websites.includes(href)
-      ) {
-        websites.push(href);
+    let sameAsLinks = [];
+    jsonLd.forEach(obj => {
+      if (Array.isArray(obj)) {
+        obj.forEach(o => {
+          if (o.sameAs) sameAsLinks = sameAsLinks.concat(o.sameAs);
+        });
+      } else if (obj.sameAs) {
+        if (Array.isArray(obj.sameAs)) {
+          sameAsLinks = sameAsLinks.concat(obj.sameAs);
+        } else {
+          sameAsLinks.push(obj.sameAs);
+        }
       }
-    }
+    });
+
+    const allLinks = anchors.concat(sameAsLinks);
+
+    // --- Classify links ---
+    const social = {};
+    const websites = [];
+    const otherLinks = [];
+
+    const classify = href => {
+      try {
+        const host = new URL(href).hostname.replace(/^www\./, "").toLowerCase();
+        if (host.includes("instagram.com")) return "instagram";
+        if (host.includes("twitter.com") || host === "x.com") return "twitter";
+        if (host.includes("facebook.com")) return "facebook";
+        if (host.includes("tiktok.com")) return "tiktok";
+        if (host.includes("linkedin.com")) return "linkedin";
+        if (host.includes("patreon.com")) return "patreon";
+        if (host.includes("ko-fi.com") || host.includes("kofi.com")) return "kofi";
+        if (host.includes("discord.gg")) return "discord";
+        if (host.includes("twitch.tv")) return "twitch";
+        // filter out youtube + image CDN
+        if (
+          host.includes("youtube.com") ||
+          host.includes("youtu.be") ||
+          host.includes("ytimg.com") ||
+          host.includes("googleusercontent.com")
+        ) {
+          return "ignore";
+        }
+        return "website";
+      } catch {
+        return "other";
+      }
+    };
+
+    allLinks.forEach(href => {
+      const type = classify(href);
+      if (type === "ignore") return;
+      if (type === "website") websites.push(href);
+      else if (type === "other") otherLinks.push(href);
+      else social[type] = social[type] || href;
+    });
+
+    return {
+      emails: uniq(emails),
+      social,
+      websites: uniq(websites),
+      otherLinks: uniq(otherLinks)
+    };
   });
 
-  return { emails, websites, socialMedia };
+  return result;
 }
 
 // Puppeteer-based scrape-about route
@@ -92,43 +141,33 @@ app.get("/api/scrape-about", async (req, res) => {
       "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
     );
 
-    // Navigate to About page
     const url = `https://www.youtube.com/channel/${channelId}/about`;
     await page.goto(url, { waitUntil: "networkidle2", timeout: 30000 });
-
-    // Give it a bit of breathing room
     await page.waitForTimeout(3000);
 
-    // Extract raw HTML
-    const content = await page.content();
-
-    // Extract contact info
-    const contacts = extractContactInfo(content);
+    const contacts = await extractContactInfoFromPage(page);
 
     res.json({
       channelId,
       aboutUrl: url,
-      ...contacts,
-      rawHtml: content
+      ...contacts
     });
   } catch (err) {
     console.error("❌ Error scraping channel:", err.message);
     res.status(500).json({ error: err.message });
   } finally {
-    if (browser) {
-      await browser.close();
-    }
+    if (browser) await browser.close();
   }
 });
 
-// --- 2) Serve frontend --- //
+// --- Serve frontend --- //
 app.use(express.static(path.join(__dirname, "public")));
 
 app.get("/", (req, res) => {
   res.sendFile(path.join(__dirname, "public", "index.html"));
 });
 
-// Port binding (Render uses process.env.PORT)
+// Port binding
 const PORT = process.env.PORT || 10000;
 app.listen(PORT, () => {
   console.log(`✅ Server running on port ${PORT}`);
