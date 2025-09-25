@@ -31,7 +31,7 @@ async function extractContactInfoFromPage(page) {
     const pageText = document.body ? document.body.innerText : "";
     const emails = (pageText.match(emailRegex) || []).map(e => e.toLowerCase());
 
-    // run inside page.evaluate (or as part of extractContactInfoFromPage)
+    // Detect business inquiry email
     const hasBusinessInquiry = (() => {
       try {
         // common text on the button: "For business inquiries" / "business inquiries"
@@ -94,13 +94,13 @@ async function extractContactInfoFromPage(page) {
       try {
         const host = new URL(href).hostname.replace(/^www\./, "").toLowerCase();
         if (host.includes("instagram.com")) return "instagram";
-        if (host.includes("twitter.com") || host === "x.com") return "twitter";
+        if (host.includes("twitter.com") || host.includes("x.com")) return "twitter";
         if (host.includes("facebook.com")) return "facebook";
         if (host.includes("tiktok.com")) return "tiktok";
         if (host.includes("linkedin.com")) return "linkedin";
         if (host.includes("patreon.com")) return "patreon";
         if (host.includes("ko-fi.com") || host.includes("kofi.com")) return "kofi";
-        if (host.includes("discord.gg")) return "discord";
+        if (host.includes("discord.gg") || host.includes("discord.com")) return "discord";
         if (host.includes("twitch.tv")) return "twitch";
         // filter out youtube + image CDN
         if (
