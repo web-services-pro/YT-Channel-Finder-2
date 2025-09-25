@@ -2,12 +2,18 @@ import express from "express";
 import puppeteer from "puppeteer";
 import cors from "cors";
 import bodyParser from "body-parser";
+import path from "path";
+import { fileURLToPath } from "url";
 
 const app = express();
 
 // Middleware
 app.use(cors());
 app.use(bodyParser.json());
+
+// For ES modules (__dirname fix)
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 // Health check endpoint
 app.get("/api/health", (req, res) => {
@@ -113,6 +119,13 @@ app.get("/api/scrape-about", async (req, res) => {
       await browser.close();
     }
   }
+});
+
+// --- 2) Serve frontend --- //
+app.use(express.static(path.join(__dirname, "public")));
+
+app.get("/", (req, res) => {
+  res.sendFile(path.join(__dirname, "public", "index.html"));
 });
 
 // Port binding (Render uses process.env.PORT)
