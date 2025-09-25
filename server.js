@@ -31,6 +31,25 @@ async function extractContactInfoFromPage(page) {
     const pageText = document.body ? document.body.innerText : "";
     const emails = (pageText.match(emailRegex) || []).map(e => e.toLowerCase());
 
+    // run inside page.evaluate (or as part of extractContactInfoFromPage)
+    const hasBusinessInquiry = (() => {
+      try {
+        // common text on the button: "For business inquiries" / "business inquiries"
+        const btn = Array.from(document.querySelectorAll('tp-yt-paper-button, button, a'))
+          .find(el => (el.innerText || '').toLowerCase().includes('business inquiry') ||
+                      (el.innerText || '').toLowerCase().includes('business inquiries') ||
+                      (el.getAttribute && (el.getAttribute('aria-label') || '').toLowerCase().includes('business inquiries')));
+        if (btn) return true;
+
+        // sometimes there's a mailto anchor visible already
+        const mailAnchor = Array.from(document.querySelectorAll('a[href^="mailto:"]')).length > 0;
+        if (mailAnchor) return true;
+      } catch (e) {
+        // ignore
+      }
+      return false;
+    })();
+    
     // --- Anchors ---
     const anchors = Array.from(document.querySelectorAll("a[href]"))
       .map(a => a.href)
@@ -110,7 +129,8 @@ async function extractContactInfoFromPage(page) {
       emails: uniq(emails),
       social,
       websites: uniq(websites),
-      otherLinks: uniq(otherLinks)
+      otherLinks: uniq(otherLinks),
+      hasBusinessInquiry 
     };
   });
 
