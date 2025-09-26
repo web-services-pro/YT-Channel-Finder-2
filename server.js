@@ -4,7 +4,7 @@ import cors from "cors";
 import bodyParser from "body-parser";
 import path from "path";
 import { fileURLToPath } from "url";
-import { generatePersonalizedOutreach } from "./generatePersonalizedOutreach.js";
+import { generatePersonalizedOutreach } from "./api/generatePersonalizedOutreach.js";
 
 const app = express();
 
@@ -32,34 +32,32 @@ async function extractContactInfoFromPage(page) {
     const pageText = document.body ? document.body.innerText : "";
     const emails = (pageText.match(emailRegex) || []).map(e => e.toLowerCase());
 
-    // Detect business inquiry email
+    // Detect "business inquiries" button / mailto
     const hasBusinessInquiry = (() => {
       try {
-        // common text on the button: "For business inquiries" / "business inquiries"
         const btn = Array.from(document.querySelectorAll('tp-yt-paper-button, button, a'))
-          .find(el => (el.innerText || '').toLowerCase().includes('business inquiry') ||
-                      (el.innerText || '').toLowerCase().includes('business inquiries') ||
-                      (el.getAttribute && (el.getAttribute('aria-label') || '').toLowerCase().includes('business inquiries')));
+          .find(el =>
+            (el.innerText || "").toLowerCase().includes("business inquiry") ||
+            (el.innerText || "").toLowerCase().includes("business inquiries") ||
+            (el.getAttribute && (el.getAttribute("aria-label") || "").toLowerCase().includes("business inquiries"))
+          );
         if (btn) return true;
 
-        // sometimes there's a mailto anchor visible already
         const mailAnchor = Array.from(document.querySelectorAll('a[href^="mailto:"]')).length > 0;
         if (mailAnchor) return true;
-      } catch (e) {
+      } catch {
         // ignore
       }
       return false;
     })();
-    
+
     // --- Anchors ---
     const anchors = Array.from(document.querySelectorAll("a[href]"))
       .map(a => a.href)
       .filter(Boolean);
 
     // --- JSON-LD blocks ---
-    const jsonLd = Array.from(
-      document.querySelectorAll('script[type="application/ld+json"]')
-    )
+    const jsonLd = Array.from(document.querySelectorAll('script[type="application/ld+json"]'))
       .map(s => {
         try {
           return JSON.parse(s.textContent);
@@ -95,15 +93,15 @@ async function extractContactInfoFromPage(page) {
       try {
         const host = new URL(href).hostname.replace(/^www\./, "").toLowerCase();
         if (host.includes("instagram.com")) return "instagram";
-        if (host.includes("twitter.com") || host.includes("x.com")) return "twitter";
+        if (host.includes("twitter.com") || host === "x.com") return "twitter";
         if (host.includes("facebook.com")) return "facebook";
         if (host.includes("tiktok.com")) return "tiktok";
         if (host.includes("linkedin.com")) return "linkedin";
         if (host.includes("patreon.com")) return "patreon";
         if (host.includes("ko-fi.com") || host.includes("kofi.com")) return "kofi";
-        if (host.includes("discord.gg") || host.includes("discord.com")) return "discord";
+        if (host.includes("discord.gg")) return "discord";
         if (host.includes("twitch.tv")) return "twitch";
-        // filter out youtube + image CDN
+        // ignore YT + image/CDN
         if (
           host.includes("youtube.com") ||
           host.includes("youtu.be") ||
@@ -131,7 +129,7 @@ async function extractContactInfoFromPage(page) {
       social,
       websites: uniq(websites),
       otherLinks: uniq(otherLinks),
-      hasBusinessInquiry 
+      hasBusinessInquiry
     };
   });
 
@@ -181,19 +179,28 @@ app.get("/api/scrape-about", async (req, res) => {
   }
 });
 
-// After scraping channel info
-const outreach = await generatePersonalizedOutreach({
-  channelName: channel.snippet.title,
-  description: channel.snippet.description,
-  recentVideos: channel.recentVideos || [],
-  ownerName: channel.ownerName || "", // if you parse it earlier
-});
+// --- AI Outreach endpoint ---
+app.post("/api/outreach", async (req, res) => {
+  try {
+    const { channelName, description, recentVideos, ownerName } = req.body;
 
-return {
-  ...otherChannelFields,
-  aiSubjectLine: outreach.subjectLine,
-  aiFirstLine: outreach.firstLine
-};
+    const outreach = await generatePersonalizedOutreach({
+      channelName,
+      description,
+      recentVideos: recentVideos || [],
+      ownerName: ownerName || ""
+    });
+
+    res.json({
+      success: true,
+      aiSubjectLine: outreach.subjectLine,
+      aiFirstLine: outreach.firstLine
+    });
+  } catch (err) {
+    console.error("❌ Error generating outreach:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
 
 // --- Serve frontend --- //
 app.use(express.static(path.join(__dirname, "public")));
