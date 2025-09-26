@@ -1,10 +1,11 @@
 import express from "express";
-import puppeteer from "puppeteer";
 import cors from "cors";
 import bodyParser from "body-parser";
 import path from "path";
 import { fileURLToPath } from "url";
 import { generatePersonalizedOutreach } from "./api/generatePersonalizedOutreach.js";
+import puppeteer from "puppeteer-core";
+import chromium from "chromium";
 
 const app = express();
 
@@ -147,12 +148,9 @@ app.get("/api/scrape-about", async (req, res) => {
   let browser;
   try {
     browser = await puppeteer.launch({
-      headless: true,
-      args: [
-        "--no-sandbox",
-        "--disable-setuid-sandbox",
-        "--disable-blink-features=AutomationControlled"
-      ]
+      args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-blink-features=AutomationControlled'],
+      executablePath: chromium.path,
+      headless: true
     });
 
     const page = await browser.newPage();
