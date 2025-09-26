@@ -1654,7 +1654,9 @@
                     'Email Available',
                     'Monetization',
                     'Other Links',
-                    'Description'
+                    'Description',
+                    'aiSubjectLine',
+                    'aiFirstLine'
                 ];
     
                 const csvContent = [
@@ -1682,7 +1684,9 @@
                               ? channel.otherLinks.join(' | ') 
                               : ''
                             ).replace(/"/g, '""')}"`,
-                        `"${(channel.description || '').replace(/"/g, '""').substring(0, 200)}"`
+                        `"${(channel.description || '').replace(/"/g, '""').substring(0, 200)}"`,
+                        `"${(channel.aiSubjectLine || '').replace(/"/g, '""')}"`,
+                        `"${(channel.aiFirstLine || '').replace(/"/g, '""')}"`
                     ].join(','))
                 ].join('\n');
     
