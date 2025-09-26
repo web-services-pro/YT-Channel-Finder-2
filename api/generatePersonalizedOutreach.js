@@ -33,9 +33,10 @@ Use the following YouTube channel data to generate personalized outreach.
 
 ### Rules:
 1. Subject line: very short (max 6 words), intriguing, and specific to their recent content.
-2. First line: MUST follow this template exactly:
+2. Extract the first name of the channel owner from the channel description or a video transcript or description or comments.
+3. First line: MUST follow this template exactly:
    "Hey (First-Name), watched some of your recent videos like the one about (2-3 word summary of a recent video title), and noticed that..."
-   - After "noticed that", continue with a personalized observation based on their About section or video themes.
+   - After "noticed that", continue with a personalized observation based on their About section or video themes. If nothing "noteworthy" can be extracted, refer to their specific monetization method (for example selling a course or affiliate products), or lack thereof.
 3. Be specific and natural. No generic compliments. Avoid sounding like AI.
 4. Always return valid JSON.
 
@@ -48,7 +49,7 @@ Use the following YouTube channel data to generate personalized outreach.
 ---
 
 Channel Name: ${channelName}
-First Name (guess): ${firstName}
+First Name: ${firstName}
 About: ${description || "N/A"}
 Recent Video Titles:
 ${videoTitles}
