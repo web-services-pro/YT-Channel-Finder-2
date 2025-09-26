@@ -4,6 +4,7 @@ import cors from "cors";
 import bodyParser from "body-parser";
 import path from "path";
 import { fileURLToPath } from "url";
+import { generatePersonalizedOutreach } from "./generatePersonalizedOutreach.js";
 
 const app = express();
 
@@ -179,6 +180,20 @@ app.get("/api/scrape-about", async (req, res) => {
     if (browser) await browser.close();
   }
 });
+
+// After scraping channel info
+const outreach = await generatePersonalizedOutreach({
+  channelName: channel.snippet.title,
+  description: channel.snippet.description,
+  recentVideos: channel.recentVideos || [],
+  ownerName: channel.ownerName || "", // if you parse it earlier
+});
+
+return {
+  ...otherChannelFields,
+  aiSubjectLine: outreach.subjectLine,
+  aiFirstLine: outreach.firstLine
+};
 
 // --- Serve frontend --- //
 app.use(express.static(path.join(__dirname, "public")));
