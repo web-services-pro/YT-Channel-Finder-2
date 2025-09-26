@@ -22,33 +22,31 @@ app.get("/api/health", (req, res) => {
   res.json({ status: "ok", message: "Server is running 🚀" });
 });
 
-// --- Enhanced extractor run inside page.evaluate ---
+// --- Extractor run inside page.evaluate ---
 async function extractContactInfoFromPage(page) {
   const result = await page.evaluate(() => {
     const uniq = arr => [...new Set(arr.filter(Boolean))];
 
-    // --- Emails ---
+    // --- Emails directly visible on page ---
     const emailRegex =
       /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g;
     const pageText = document.body ? document.body.innerText : "";
     const emails = (pageText.match(emailRegex) || []).map(e => e.toLowerCase());
 
-    // Detect "business inquiries" button / mailto
+    // --- Detect "business inquiries" button ---
     const hasBusinessInquiry = (() => {
       try {
-        const btn = Array.from(document.querySelectorAll('tp-yt-paper-button, button, a'))
+        const btn = Array.from(document.querySelectorAll("tp-yt-paper-button, button, a"))
           .find(el =>
-            (el.innerText || "").toLowerCase().includes("business inquiry") ||
-            (el.innerText || "").toLowerCase().includes("business inquiries") ||
-            (el.getAttribute && (el.getAttribute("aria-label") || "").toLowerCase().includes("business inquiries"))
+            (el.innerText || "").toLowerCase().includes("business inquiry")
           );
         if (btn) return true;
 
-        const mailAnchor = Array.from(document.querySelectorAll('a[href^="mailto:"]')).length > 0;
-        if (mailAnchor) return true;
-      } catch {
-        // ignore
-      }
+        // If we see a mailto link
+        if (Array.from(document.querySelectorAll('a[href^="mailto:"]')).length > 0) {
+          return true;
+        }
+      } catch {}
       return false;
     })();
 
@@ -57,7 +55,7 @@ async function extractContactInfoFromPage(page) {
       .map(a => a.href)
       .filter(Boolean);
 
-    // --- JSON-LD blocks ---
+    // --- JSON-LD "sameAs" links ---
     const jsonLd = Array.from(document.querySelectorAll('script[type="application/ld+json"]'))
       .map(s => {
         try {
@@ -75,11 +73,7 @@ async function extractContactInfoFromPage(page) {
           if (o.sameAs) sameAsLinks = sameAsLinks.concat(o.sameAs);
         });
       } else if (obj.sameAs) {
-        if (Array.isArray(obj.sameAs)) {
-          sameAsLinks = sameAsLinks.concat(obj.sameAs);
-        } else {
-          sameAsLinks.push(obj.sameAs);
-        }
+        sameAsLinks = sameAsLinks.concat(obj.sameAs);
       }
     });
 
@@ -102,7 +96,7 @@ async function extractContactInfoFromPage(page) {
         if (host.includes("ko-fi.com") || host.includes("kofi.com")) return "kofi";
         if (host.includes("discord.gg") || host.includes("discord.com")) return "discord";
         if (host.includes("twitch.tv")) return "twitch";
-        // ignore YT + image/CDN
+        // Ignore YouTube + CDN links
         if (
           host.includes("youtube.com") ||
           host.includes("youtu.be") ||
@@ -137,10 +131,9 @@ async function extractContactInfoFromPage(page) {
   return result;
 }
 
-// Puppeteer-based scrape-about route
+// --- Puppeteer-based About scraper ---
 app.get("/api/scrape-about", async (req, res) => {
   const { channelId } = req.query;
-
   if (!channelId) {
     return res.status(400).json({ error: "Missing channelId parameter" });
   }
@@ -148,7 +141,7 @@ app.get("/api/scrape-about", async (req, res) => {
   let browser;
   try {
     browser = await puppeteer.launch({
-      args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-blink-features=AutomationControlled'],
+      args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-blink-features=AutomationControlled"],
       executablePath: chromium.path,
       headless: true
     });
@@ -167,7 +160,8 @@ app.get("/api/scrape-about", async (req, res) => {
     res.json({
       channelId,
       aboutUrl: url,
-      ...contacts
+      ...contacts,
+      emailAvailable: contacts.hasBusinessInquiry ? "Yes" : "No" // ✅ fix for inquiry detection
     });
   } catch (err) {
     console.error("❌ Error scraping channel:", err.message);
@@ -191,8 +185,8 @@ app.post("/api/outreach", async (req, res) => {
 
     res.json({
       success: true,
-      aiSubjectLine: outreach.subjectLine,
-      aiFirstLine: outreach.firstLine
+      aiSubjectLine: outreach.subjectLine || "",
+      aiFirstLine: outreach.firstLine || ""
     });
   } catch (err) {
     console.error("❌ Error generating outreach:", err.message);
