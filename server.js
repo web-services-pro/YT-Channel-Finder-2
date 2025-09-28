@@ -3,18 +3,30 @@ import cors from "cors";
 import bodyParser from "body-parser";
 import path from "path";
 import { fileURLToPath } from "url";
-import puppeteer from "puppeteer-extra";
-import StealthPlugin from "puppeteer-extra-plugin-stealth";
-import { executablePath } from "puppeteer";
 import { generatePersonalizedOutreach } from "./api/generatePersonalizedOutreach.js";
 
-puppeteer.use(StealthPlugin());
+// Dynamic imports for puppeteer to handle cloud deployment issues
+let puppeteer;
+let StealthPlugin;
+
+try {
+  const puppeteerExtra = await import("puppeteer-extra");
+  const stealthPlugin = await import("puppeteer-extra-plugin-stealth");
+  puppeteer = puppeteerExtra.default;
+  StealthPlugin = stealthPlugin.default;
+  puppeteer.use(StealthPlugin());
+  console.log("✅ Puppeteer loaded successfully");
+} catch (error) {
+  console.warn("⚠️ Puppeteer failed to load:", error.message);
+  puppeteer = null;
+}
 
 const app = express();
 
 // Middleware
 app.use(cors());
-app.use(bodyParser.json());
+app.use(bodyParser.json({ limit: '10mb' }));
+app.use(bodyParser.urlencoded({ extended: true, limit: '10mb' }));
 
 // For ES modules (__dirname fix)
 const __filename = fileURLToPath(import.meta.url);
@@ -22,7 +34,13 @@ const __dirname = path.dirname(__filename);
 
 // Health check
 app.get("/api/health", (req, res) => {
-  res.json({ status: "ok", message: "Server is running 🚀" });
+  res.json({ 
+    status: "ok", 
+    message: "Server is running 🚀",
+    puppeteerAvailable: !!puppeteer,
+    nodeVersion: process.version,
+    platform: process.platform
+  });
 });
 
 // --- Enhanced scraper helper ---
@@ -116,7 +134,6 @@ async function extractContactInfoFromPage(page) {
       try {
         const url = new URL(href);
         const host = url.hostname.replace(/^www\./, "").toLowerCase();
-        const pathname = url.pathname.toLowerCase();
         
         // Social media classification
         if (host.includes("instagram.com") || host === "instagr.am") return "instagram";
@@ -189,13 +206,27 @@ app.get("/api/scrape-about", async (req, res) => {
   const { channelId } = req.query;
   if (!channelId) return res.status(400).json({ error: "Missing channelId" });
 
+  // Check if puppeteer is available
+  if (!puppeteer) {
+    return res.status(503).json({ 
+      error: "Puppeteer not available in this environment",
+      channelId,
+      success: false,
+      emails: [],
+      social: {},
+      websites: [],
+      otherLinks: [],
+      hasBusinessInquiry: false
+    });
+  }
+
   let browser;
   try {
     console.log(`Starting scrape for channel: ${channelId}`);
     
+    // Cloud-optimized browser launch
     browser = await puppeteer.launch({
-      headless: true,
-      executablePath: executablePath(),
+      headless: "new",
       args: [
         "--no-sandbox", 
         "--disable-setuid-sandbox",
@@ -203,31 +234,36 @@ app.get("/api/scrape-about", async (req, res) => {
         "--disable-accelerated-2d-canvas",
         "--no-first-run",
         "--no-zygote",
-        "--disable-gpu"
-      ]
+        "--disable-gpu",
+        "--disable-background-timer-throttling",
+        "--disable-backgrounding-occluded-windows",
+        "--disable-renderer-backgrounding",
+        "--disable-features=TranslateUI",
+        "--disable-ipc-flooding-protection",
+        "--single-process" // Important for some cloud environments
+      ],
+      timeout: 60000
     });
 
     const page = await browser.newPage();
     
-    // Set a more realistic user agent
+    // Set realistic user agent and viewport
     await page.setUserAgent(
       "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
     );
-
-    // Set viewport
     await page.setViewport({ width: 1920, height: 1080 });
 
     const url = `https://www.youtube.com/channel/${channelId}/about`;
     console.log(`Navigating to: ${url}`);
     
-    // Navigate with longer timeout and better error handling
+    // Navigate with timeout
     await page.goto(url, { 
       waitUntil: "networkidle2", 
-      timeout: 60000 
+      timeout: 30000 
     });
 
-    // Wait a bit for dynamic content to load
-    await page.waitForTimeout(3000);
+    // Wait for dynamic content
+    await page.waitForTimeout(2000);
 
     // Check if page loaded correctly
     const title = await page.title();
@@ -248,6 +284,8 @@ app.get("/api/scrape-about", async (req, res) => {
       hasBusinessInquiry: contacts.hasBusinessInquiry
     });
 
+    await browser.close();
+
     res.json({ 
       channelId, 
       aboutUrl: url,
@@ -257,6 +295,15 @@ app.get("/api/scrape-about", async (req, res) => {
 
   } catch (err) {
     console.error(`❌ Error scraping channel ${channelId}:`, err.message);
+    
+    if (browser) {
+      try {
+        await browser.close();
+      } catch (closeErr) {
+        console.error("Error closing browser:", closeErr.message);
+      }
+    }
+
     res.status(500).json({ 
       error: err.message, 
       channelId,
@@ -267,14 +314,6 @@ app.get("/api/scrape-about", async (req, res) => {
       otherLinks: [],
       hasBusinessInquiry: false
     });
-  } finally {
-    if (browser) {
-      try {
-        await browser.close();
-      } catch (closeErr) {
-        console.error("Error closing browser:", closeErr.message);
-      }
-    }
   }
 });
 
@@ -324,12 +363,14 @@ app.get("/api/test-scrape", async (req, res) => {
       message: "Scraper test completed",
       testChannelId,
       scrapingWorking: scrapeResp.ok,
+      puppeteerAvailable: !!puppeteer,
       results: scrapeData
     });
   } catch (err) {
     res.status(500).json({
       message: "Scraper test failed",
-      error: err.message
+      error: err.message,
+      puppeteerAvailable: !!puppeteer
     });
   }
 });
@@ -340,8 +381,16 @@ app.get("/", (req, res) => {
   res.sendFile(path.join(__dirname, "public", "index.html"));
 });
 
+// --- Error handling middleware ---
+app.use((err, req, res, next) => {
+  console.error('Unhandled error:', err);
+  res.status(500).json({ error: 'Internal server error', message: err.message });
+});
+
 // --- Start server ---
 const PORT = process.env.PORT || 10000;
 app.listen(PORT, () => {
   console.log(`✅ Server running on port ${PORT}`);
+  console.log(`🔧 Puppeteer available: ${!!puppeteer}`);
+  console.log(`📍 Environment: ${process.env.NODE_ENV || 'development'}`);
 });
