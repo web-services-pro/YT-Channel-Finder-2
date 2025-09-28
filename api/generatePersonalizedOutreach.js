@@ -1,8 +1,5 @@
+// Fixed generatePersonalizedOutreach.js
 import OpenAI from "openai";
-
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY, // set in Render/ENV
-});
 
 /**
  * Generate a personalized subject line + first line for outreach
@@ -12,19 +9,38 @@ const openai = new OpenAI({
  * @param {string} channelData.description - Channel "About" text
  * @param {Array} channelData.recentVideos - Array of {title, description}
  * @param {string} [channelData.ownerName] - optional pre-extracted first name
+ * @param {string} [channelData.openaiApiKey] - OpenAI API key
  * 
  * @returns {Promise<{subjectLine: string, firstLine: string}>}
  */
 export async function generatePersonalizedOutreach(channelData) {
-  const { channelName, description, recentVideos = [], ownerName } = channelData;
+  const { channelName, description, recentVideos = [], ownerName, openaiApiKey } = channelData;
+
+  // Check for API key (prefer parameter over environment variable)
+  const apiKey = openaiApiKey || process.env.OPENAI_API_KEY;
+  if (!apiKey) {
+    console.warn("No OpenAI API key provided");
+    return {
+      subjectLine: "",
+      firstLine: "",
+    };
+  }
+
+  const openai = new OpenAI({
+    apiKey: apiKey,
+  });
 
   // Fallback first name (try ownerName, else first token of channelName)
   const firstName =
     ownerName ||
     (channelName ? channelName.split(" ")[0] : "there");
 
-  // Gather recent video titles (only need 5 max)
-  const videoTitles = recentVideos.slice(0, 5).map(v => v.title).join("\n");
+  // Gather recent video titles (only need 3 max for context)
+  const videoTitles = recentVideos
+    .slice(0, 3)
+    .map(v => v.title)
+    .filter(Boolean)
+    .join("\n");
 
   // Construct the prompt
   const systemPrompt = `
@@ -33,17 +49,16 @@ Use the following YouTube channel data to generate personalized outreach.
 
 ### Rules:
 1. Subject line: very short (max 6 words), intriguing, and specific to their recent content.
-2. Extract the first name of the channel owner from the channel description or a video transcript or description or comments.
-3. First line: MUST follow this template exactly:
-   "Hey (First-Name), watched some of your recent videos like the one about (2-3 word summary of a recent video title), and noticed that..."
-   - After "noticed that", continue with a personalized observation based on their About section or video themes. If nothing "noteworthy" can be extracted, refer to their specific monetization method (for example selling a course or affiliate products), or lack thereof.
+2. First line: MUST follow this template exactly:
+   "Hey ${firstName}, watched some of your recent videos like the one about [2-3 word summary of a recent video title], and noticed that..."
+   - After "noticed that", continue with a personalized observation based on their About section or video themes.
 3. Be specific and natural. No generic compliments. Avoid sounding like AI.
-4. Always return valid JSON.
+4. Always return valid JSON with exactly these keys: "subjectLine" and "firstLine"
 
 ### Example:
 {
-  "subjectLine": "Your unedited videos from Dubai",
-  "firstLine": "Hey John, watched some of your recent videos like the one about unedited Dubai vlogs, and noticed that you’ve been worried about their quality..."
+  "subjectLine": "Your Dubai vlog approach",
+  "firstLine": "Hey John, watched some of your recent videos like the one about Dubai vlogs, and noticed that you focus heavily on authentic experiences rather than typical tourist spots..."
 }
 
 ---
@@ -52,13 +67,16 @@ Channel Name: ${channelName}
 First Name: ${firstName}
 About: ${description || "N/A"}
 Recent Video Titles:
-${videoTitles}
+${videoTitles || "No recent videos available"}
 `;
 
   try {
+    console.log(`Generating outreach for ${channelName} with OpenAI...`);
+    
     const response = await openai.chat.completions.create({
       model: "gpt-4o-mini",
       temperature: 0.7,
+      max_tokens: 200,
       messages: [
         { role: "system", content: systemPrompt },
       ],
@@ -66,6 +84,8 @@ ${videoTitles}
     });
 
     const content = response.choices[0].message.content;
+    console.log(`OpenAI response for ${channelName}:`, content);
+    
     const parsed = JSON.parse(content);
 
     return {
@@ -74,9 +94,53 @@ ${videoTitles}
     };
   } catch (err) {
     console.error("❌ OpenAI outreach generation failed:", err.message);
+    
+    // Return fallback content instead of empty strings
+    const fallbackSubject = recentVideos.length > 0 
+      ? `Your ${recentVideos[0].title.split(' ').slice(0, 2).join(' ')} video`
+      : `Your ${channelName.split(' ')[0]} content`;
+      
+    const fallbackFirstLine = recentVideos.length > 0
+      ? `Hey ${firstName}, watched your recent video about ${recentVideos[0].title.split(' ').slice(0, 3).join(' ')}, and noticed that you have a unique approach to your content...`
+      : `Hey ${firstName}, came across your channel and noticed that you create interesting content in your niche...`;
+    
     return {
-      subjectLine: "",
-      firstLine: "",
+      subjectLine: fallbackSubject.substring(0, 50), // Ensure it's not too long
+      firstLine: fallbackFirstLine,
     };
   }
 }
+
+// Fixed server.js outreach endpoint
+app.post("/api/outreach", async (req, res) => {
+  try {
+    const { channelName, description, recentVideos, ownerName, openaiApiKey } = req.body;
+
+    console.log(`Outreach request for: ${channelName}`);
+    console.log(`OpenAI key provided: ${!!openaiApiKey}`);
+
+    const outreach = await generatePersonalizedOutreach({
+      channelName,
+      description,
+      recentVideos: recentVideos || [],
+      ownerName: ownerName || "",
+      openaiApiKey: openaiApiKey
+    });
+
+    console.log(`Outreach result for ${channelName}:`, outreach);
+
+    res.json({
+      success: true,
+      aiSubjectLine: outreach.subjectLine,
+      aiFirstLine: outreach.firstLine
+    });
+  } catch (err) {
+    console.error("❌ Outreach error:", err.message);
+    res.status(500).json({ 
+      error: err.message,
+      success: false,
+      aiSubjectLine: "",
+      aiFirstLine: ""
+    });
+  }
+});
