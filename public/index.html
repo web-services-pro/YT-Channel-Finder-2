@@ -423,6 +423,8 @@
                             <th>Other Links</th>
                             <th>Email Available</th>
                             <th>Description</th>
+                            <th>AI Subject Line</th>
+                            <th>AI First Line</th>
                         </tr>
                     </thead>
                     <tbody id="resultsBody">
@@ -1364,6 +1366,29 @@
                         channel.socialMedia = mergedSocials;
                         channel.otherLinks = Array.from(mergedOther);
 
+                        // --- Generate AI outreach subject + first line ---
+                        try {
+                            const outreachResp = await fetch("/api/outreach", {
+                                method: "POST",
+                                headers: { "Content-Type": "application/json" },
+                                body: JSON.stringify({
+                                    channelName: channel.name,
+                                    description: channel.description,
+                                    recentVideos: channel.recentVideos,
+                                    ownerName: channel.name // fallback if no owner known
+                                })
+                            });
+                            if (outreachResp.ok) {
+                                const outreachData = await outreachResp.json();
+                                channel.aiSubjectLine = outreachData.aiSubjectLine || "";
+                                channel.aiFirstLine = outreachData.aiFirstLine || "";
+                            }
+                        } catch (err) {
+                            console.warn("Outreach generation failed:", err);
+                            channel.aiSubjectLine = "";
+                            channel.aiFirstLine = "";
+                        }
+
                         // --- Engagement Rate (average of last 5 videos) ---
                         let engagementRates = [];
                         for (const v of channel.recentVideos) {
@@ -1598,6 +1623,12 @@
                         </td>
                         <td>
                             ${(channel.description || '').substring(0, 200)}
+                        </td>
+                        <td>
+                            ${this.escapeHtml(channel.aiSubjectLine || '')}
+                        </td>
+                        <td>
+                            ${this.escapeHtml(channel.aiFirstLine || '')}
                         </td>
                     `;
                     tbody.appendChild(row);
