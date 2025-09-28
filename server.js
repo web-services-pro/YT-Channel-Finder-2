@@ -1,31 +1,5 @@
-import express from "express";
-import cors from "cors";
-import bodyParser from "body-parser";
-import path from "path";
-import { fileURLToPath } from "url";
-import puppeteer from "puppeteer-extra";
-import StealthPlugin from "puppeteer-extra-plugin-stealth";
-import { executablePath } from "puppeteer";
-import { generatePersonalizedOutreach } from "./api/generatePersonalizedOutreach.js";
+// Fixed server.js scraper functions
 
-puppeteer.use(StealthPlugin());
-
-const app = express();
-
-// Middleware
-app.use(cors());
-app.use(bodyParser.json());
-
-// For ES modules (__dirname fix)
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-
-// Health check
-app.get("/api/health", (req, res) => {
-  res.json({ status: "ok", message: "Server is running 🚀" });
-});
-
-// --- Scraper helpers ---
 async function extractContactInfoFromPage(page) {
   const result = await page.evaluate(() => {
     const uniq = arr => [...new Set(arr.filter(Boolean))];
@@ -35,30 +9,56 @@ async function extractContactInfoFromPage(page) {
     const pageText = document.body ? document.body.innerText : "";
     const emails = (pageText.match(emailRegex) || []).map(e => e.toLowerCase());
 
-    // Detect "business inquiry"
+    // Enhanced business inquiry detection
     const hasBusinessInquiry = (() => {
       try {
-        const btn = Array.from(document.querySelectorAll("tp-yt-paper-button, button, a"))
-          .find(el =>
-            (el.innerText || "").toLowerCase().includes("business inquiry") ||
-            (el.innerText || "").toLowerCase().includes("business inquiries")
-          );
-        if (btn) return true;
+        // Check for business inquiry buttons/text
+        const businessTexts = [
+          'business inquir', 'business email', 'business contact',
+          'press inquir', 'media inquir', 'collaboration', 'partnership',
+          'sponsor', 'brand deal', 'work with me', 'business@', 'contact@'
+        ];
+        
+        const pageTextLower = pageText.toLowerCase();
+        const hasBusinessText = businessTexts.some(text => pageTextLower.includes(text));
+        
+        // Check for mailto links
+        const mailtoLinks = Array.from(document.querySelectorAll('a[href^="mailto:"]')).length > 0;
+        
+        // Check for business inquiry buttons
+        const businessButtons = Array.from(document.querySelectorAll("button, a, tp-yt-paper-button"))
+          .some(el => {
+            const text = (el.innerText || '').toLowerCase();
+            return text.includes("business") || text.includes("inquiry") || text.includes("contact");
+          });
 
-        const mailAnchor = Array.from(document.querySelectorAll('a[href^="mailto:"]')).length > 0;
-        if (mailAnchor) return true;
+        return hasBusinessText || mailtoLinks || businessButtons || emails.length > 0;
       } catch {
-        // ignore
+        return emails.length > 0; // Fallback to email presence
       }
-      return false;
     })();
 
-    // Collect anchor links
+    // Collect all links from various sources
+    const allLinks = [];
+
+    // Regular anchor links
     const anchors = Array.from(document.querySelectorAll("a[href]"))
       .map(a => a.href)
       .filter(Boolean);
+    allLinks.push(...anchors);
 
-    // Collect links from JSON-LD
+    // External links from YouTube's custom sections
+    const externalLinks = Array.from(document.querySelectorAll([
+      '.yt-channel-external-link-view-model-wiz__container a',
+      '[data-target-new-window="true"]',
+      '.about-stats__item a',
+      '.channel-header-links a'
+    ].join(', ')))
+      .map(a => a.href)
+      .filter(Boolean);
+    allLinks.push(...externalLinks);
+
+    // JSON-LD structured data
     const jsonLd = Array.from(document.querySelectorAll('script[type="application/ld+json"]'))
       .map(s => {
         try {
@@ -73,56 +73,75 @@ async function extractContactInfoFromPage(page) {
     jsonLd.forEach(obj => {
       if (Array.isArray(obj)) {
         obj.forEach(o => {
-          if (o.sameAs) sameAsLinks = sameAsLinks.concat(o.sameAs);
+          if (o.sameAs) sameAsLinks = sameAsLinks.concat(Array.isArray(o.sameAs) ? o.sameAs : [o.sameAs]);
         });
       } else if (obj.sameAs) {
-        if (Array.isArray(obj.sameAs)) {
-          sameAsLinks = sameAsLinks.concat(obj.sameAs);
-        } else {
-          sameAsLinks.push(obj.sameAs);
-        }
+        sameAsLinks = sameAsLinks.concat(Array.isArray(obj.sameAs) ? obj.sameAs : [obj.sameAs]);
       }
     });
+    allLinks.push(...sameAsLinks);
 
-    const allLinks = anchors.concat(sameAsLinks);
-
-    // Social link detection
+    // Categorize links
     const social = {};
     const websites = [];
     const otherLinks = [];
 
     const classify = href => {
       try {
-        const host = new URL(href).hostname.replace(/^www\./, "").toLowerCase();
-        if (host.includes("instagram.com")) return "instagram";
-        if (host.includes("twitter.com") || host.includes("x.com")) return "twitter";
-        if (host.includes("facebook.com")) return "facebook";
+        const url = new URL(href);
+        const host = url.hostname.replace(/^www\./, "").toLowerCase();
+        const pathname = url.pathname.toLowerCase();
+        
+        // Social media classification
+        if (host.includes("instagram.com") || host === "instagr.am") return "instagram";
+        if (host.includes("twitter.com") || host === "x.com") return "twitter";
+        if (host.includes("facebook.com") || host === "fb.com" || host === "fb.me") return "facebook";
         if (host.includes("tiktok.com")) return "tiktok";
         if (host.includes("linkedin.com")) return "linkedin";
         if (host.includes("patreon.com")) return "patreon";
+        if (host.includes("ko-fi.com")) return "kofi";
+        if (host.includes("buymeacoffee.com")) return "buymeacoffee";
         if (host.includes("discord.gg") || host.includes("discord.com")) return "discord";
         if (host.includes("twitch.tv")) return "twitch";
-        // ignore YT + image/CDN
+        if (host.includes("reddit.com")) return "reddit";
+        if (host.includes("pinterest.com")) return "pinterest";
+        if (host.includes("snapchat.com")) return "snapchat";
+        if (host.includes("threads.net")) return "threads";
+        if (host.includes("onlyfans.com")) return "onlyfans";
+        if (host.includes("substack.com")) return "substack";
+        if (host.includes("medium.com")) return "medium";
+        if (host.includes("github.com")) return "github";
+        if (host.includes("telegram.me") || host === "t.me") return "telegram";
+        
+        // Ignore YouTube and CDN links
         if (
           host.includes("youtube.com") ||
           host.includes("youtu.be") ||
           host.includes("ytimg.com") ||
-          host.includes("googleusercontent.com")
+          host.includes("googleusercontent.com") ||
+          host.includes("ggpht.com")
         ) {
           return "ignore";
         }
+        
         return "website";
       } catch {
         return "other";
       }
     };
 
-    allLinks.forEach(href => {
+    // Process all unique links
+    const uniqueLinks = uniq(allLinks);
+    uniqueLinks.forEach(href => {
       const type = classify(href);
       if (type === "ignore") return;
-      if (type === "website") websites.push(href);
-      else if (type === "other") otherLinks.push(href);
-      else social[type] = social[type] || href;
+      if (type === "website") {
+        websites.push(href);
+      } else if (type === "other") {
+        otherLinks.push(href);
+      } else if (type && !social[type]) {
+        social[type] = href; // Only set if not already found
+      }
     });
 
     return {
@@ -130,93 +149,127 @@ async function extractContactInfoFromPage(page) {
       social,
       websites: uniq(websites),
       otherLinks: uniq(otherLinks),
-      hasBusinessInquiry
+      hasBusinessInquiry,
+      totalLinksFound: uniqueLinks.length,
+      socialLinksFound: Object.keys(social).length
     };
   });
-
-  // Competitor-style scraping of visible external links
-  const socialLinks = await page.$$eval(
-    ".yt-channel-external-link-view-model-wiz__container a",
-    links => links.map(link => link.href)
-  );
-
-  if (socialLinks && socialLinks.length > 0) {
-    socialLinks.forEach(href => {
-      if (href.includes("instagram.com")) result.social.instagram = href;
-      else if (href.includes("twitter.com") || href.includes("x.com")) result.social.twitter = href;
-      else if (href.includes("facebook.com")) result.social.facebook = href;
-      else if (href.includes("tiktok.com")) result.social.tiktok = href;
-      else if (href.includes("linkedin.com")) result.social.linkedin = href;
-      else result.otherLinks.push(href);
-    });
-  }
 
   return result;
 }
 
-// --- Scrape About Page ---
+// Enhanced scrape endpoint with better error handling and logging
 app.get("/api/scrape-about", async (req, res) => {
   const { channelId } = req.query;
   if (!channelId) return res.status(400).json({ error: "Missing channelId" });
 
   let browser;
   try {
+    console.log(`Starting scrape for channel: ${channelId}`);
+    
     browser = await puppeteer.launch({
       headless: true,
       executablePath: executablePath(),
-      args: ["--no-sandbox", "--disable-setuid-sandbox"]
+      args: [
+        "--no-sandbox", 
+        "--disable-setuid-sandbox",
+        "--disable-dev-shm-usage",
+        "--disable-accelerated-2d-canvas",
+        "--no-first-run",
+        "--no-zygote",
+        "--disable-gpu"
+      ]
     });
 
     const page = await browser.newPage();
+    
+    // Set a more realistic user agent
     await page.setUserAgent(
-      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
     );
 
+    // Set viewport
+    await page.setViewport({ width: 1920, height: 1080 });
+
     const url = `https://www.youtube.com/channel/${channelId}/about`;
-    await page.goto(url, { waitUntil: "networkidle2", timeout: 60000 });
+    console.log(`Navigating to: ${url}`);
+    
+    // Navigate with longer timeout and better error handling
+    await page.goto(url, { 
+      waitUntil: "networkidle2", 
+      timeout: 60000 
+    });
 
+    // Wait a bit for dynamic content to load
+    await page.waitForTimeout(3000);
+
+    // Check if page loaded correctly
+    const title = await page.title();
+    console.log(`Page title: ${title}`);
+    
+    if (title.includes('404') || title.includes('not found')) {
+      throw new Error('Channel not found or About page not accessible');
+    }
+
+    // Extract contact information
     const contacts = await extractContactInfoFromPage(page);
-
-    res.json({ channelId, aboutUrl: url, ...contacts });
-  } catch (err) {
-    console.error("❌ Error scraping channel:", err.message);
-    res.status(500).json({ error: err.message });
-  } finally {
-    if (browser) await browser.close();
-  }
-});
-
-// --- AI Outreach ---
-app.post("/api/outreach", async (req, res) => {
-  try {
-    const { channelName, description, recentVideos, ownerName } = req.body;
-
-    const outreach = await generatePersonalizedOutreach({
-      channelName,
-      description,
-      recentVideos: recentVideos || [],
-      ownerName: ownerName || ""
+    
+    console.log(`Scrape results for ${channelId}:`, {
+      emailsFound: contacts.emails.length,
+      websitesFound: contacts.websites.length,
+      socialLinksFound: contacts.socialLinksFound,
+      totalLinksFound: contacts.totalLinksFound,
+      hasBusinessInquiry: contacts.hasBusinessInquiry
     });
 
-    res.json({
+    res.json({ 
+      channelId, 
+      aboutUrl: url,
       success: true,
-      aiSubjectLine: outreach.subjectLine,
-      aiFirstLine: outreach.firstLine
+      ...contacts 
     });
+
   } catch (err) {
-    console.error("❌ Outreach error:", err.message);
-    res.status(500).json({ error: err.message });
+    console.error(`❌ Error scraping channel ${channelId}:`, err.message);
+    res.status(500).json({ 
+      error: err.message, 
+      channelId,
+      success: false,
+      emails: [],
+      social: {},
+      websites: [],
+      otherLinks: [],
+      hasBusinessInquiry: false
+    });
+  } finally {
+    if (browser) {
+      try {
+        await browser.close();
+      } catch (closeErr) {
+        console.error("Error closing browser:", closeErr.message);
+      }
+    }
   }
 });
 
-// --- Serve frontend ---
-app.use(express.static(path.join(__dirname, "public")));
-app.get("/", (req, res) => {
-  res.sendFile(path.join(__dirname, "public", "index.html"));
-});
-
-// --- Start server ---
-const PORT = process.env.PORT || 10000;
-app.listen(PORT, () => {
-  console.log(`✅ Server running on port ${PORT}`);
+// Add a test endpoint to verify scraping is working
+app.get("/api/test-scrape", async (req, res) => {
+  const testChannelId = "UCofomcxxyhNuZ6qeHzInm3Q"; // From your test data
+  
+  try {
+    const scrapeResp = await fetch(`${req.protocol}://${req.get('host')}/api/scrape-about?channelId=${testChannelId}`);
+    const scrapeData = await scrapeResp.json();
+    
+    res.json({
+      message: "Scraper test completed",
+      testChannelId,
+      scrapingWorking: scrapeResp.ok,
+      results: scrapeData
+    });
+  } catch (err) {
+    res.status(500).json({
+      message: "Scraper test failed",
+      error: err.message
+    });
+  }
 });
