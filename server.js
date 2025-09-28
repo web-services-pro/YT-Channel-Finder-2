@@ -4,8 +4,12 @@ import bodyParser from "body-parser";
 import path from "path";
 import { fileURLToPath } from "url";
 import { generatePersonalizedOutreach } from "./api/generatePersonalizedOutreach.js";
-import puppeteer from "puppeteer-core";
-import chromium from "chromium";
+
+// --- Puppeteer with stealth ---
+import puppeteer from "puppeteer-extra";
+import StealthPlugin from "puppeteer-extra-plugin-stealth";
+import { executablePath } from "puppeteer";
+puppeteer.use(StealthPlugin());
 
 const app = express();
 
@@ -22,40 +26,23 @@ app.get("/api/health", (req, res) => {
   res.json({ status: "ok", message: "Server is running 🚀" });
 });
 
-// --- Extractor run inside page.evaluate ---
+// --- Enhanced extractor run inside page.evaluate ---
 async function extractContactInfoFromPage(page) {
-  const result = await page.evaluate(() => {
+  return await page.evaluate(() => {
     const uniq = arr => [...new Set(arr.filter(Boolean))];
 
-    // --- Emails directly visible on page ---
+    // --- Emails ---
     const emailRegex =
       /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g;
     const pageText = document.body ? document.body.innerText : "";
     const emails = (pageText.match(emailRegex) || []).map(e => e.toLowerCase());
 
-    // --- Detect "business inquiries" button ---
-    const hasBusinessInquiry = (() => {
-      try {
-        const btn = Array.from(document.querySelectorAll("tp-yt-paper-button, button, a"))
-          .find(el =>
-            (el.innerText || "").toLowerCase().includes("business inquiry")
-          );
-        if (btn) return true;
+    // --- Social links from YouTube external link container ---
+    const socialMediaLinks = Array.from(
+      document.querySelectorAll(".yt-channel-external-link-view-model-wiz__container a")
+    ).map(link => link.href);
 
-        // If we see a mailto link
-        if (Array.from(document.querySelectorAll('a[href^="mailto:"]')).length > 0) {
-          return true;
-        }
-      } catch {}
-      return false;
-    })();
-
-    // --- Anchors ---
-    const anchors = Array.from(document.querySelectorAll("a[href]"))
-      .map(a => a.href)
-      .filter(Boolean);
-
-    // --- JSON-LD "sameAs" links ---
+    // --- JSON-LD sameAs links ---
     const jsonLd = Array.from(document.querySelectorAll('script[type="application/ld+json"]'))
       .map(s => {
         try {
@@ -73,11 +60,15 @@ async function extractContactInfoFromPage(page) {
           if (o.sameAs) sameAsLinks = sameAsLinks.concat(o.sameAs);
         });
       } else if (obj.sameAs) {
-        sameAsLinks = sameAsLinks.concat(obj.sameAs);
+        if (Array.isArray(obj.sameAs)) {
+          sameAsLinks = sameAsLinks.concat(obj.sameAs);
+        } else {
+          sameAsLinks.push(obj.sameAs);
+        }
       }
     });
 
-    const allLinks = anchors.concat(sameAsLinks);
+    const allLinks = socialMediaLinks.concat(sameAsLinks);
 
     // --- Classify links ---
     const social = {};
@@ -96,7 +87,7 @@ async function extractContactInfoFromPage(page) {
         if (host.includes("ko-fi.com") || host.includes("kofi.com")) return "kofi";
         if (host.includes("discord.gg") || host.includes("discord.com")) return "discord";
         if (host.includes("twitch.tv")) return "twitch";
-        // Ignore YouTube + CDN links
+        // ignore YT + image/CDN
         if (
           host.includes("youtube.com") ||
           host.includes("youtu.be") ||
@@ -124,16 +115,15 @@ async function extractContactInfoFromPage(page) {
       social,
       websites: uniq(websites),
       otherLinks: uniq(otherLinks),
-      hasBusinessInquiry
+      hasBusinessInquiry: socialMediaLinks.length > 0
     };
   });
-
-  return result;
 }
 
-// --- Puppeteer-based About scraper ---
+// Puppeteer-based scrape-about route
 app.get("/api/scrape-about", async (req, res) => {
   const { channelId } = req.query;
+
   if (!channelId) {
     return res.status(400).json({ error: "Missing channelId parameter" });
   }
@@ -141,9 +131,9 @@ app.get("/api/scrape-about", async (req, res) => {
   let browser;
   try {
     browser = await puppeteer.launch({
-      args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-blink-features=AutomationControlled"],
-      executablePath: chromium.path,
-      headless: true
+      headless: true,
+      executablePath: executablePath(),
+      args: ["--no-sandbox", "--disable-setuid-sandbox"]
     });
 
     const page = await browser.newPage();
@@ -160,8 +150,7 @@ app.get("/api/scrape-about", async (req, res) => {
     res.json({
       channelId,
       aboutUrl: url,
-      ...contacts,
-      emailAvailable: contacts.hasBusinessInquiry ? "Yes" : "No" // ✅ fix for inquiry detection
+      ...contacts
     });
   } catch (err) {
     console.error("❌ Error scraping channel:", err.message);
@@ -185,8 +174,8 @@ app.post("/api/outreach", async (req, res) => {
 
     res.json({
       success: true,
-      aiSubjectLine: outreach.subjectLine || "",
-      aiFirstLine: outreach.firstLine || ""
+      aiSubjectLine: outreach.subjectLine,
+      aiFirstLine: outreach.firstLine
     });
   } catch (err) {
     console.error("❌ Error generating outreach:", err.message);
