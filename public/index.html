@@ -840,6 +840,7 @@
                 this.foundChannels = [];
                 this.isSearching = false;
                 this.urlExtractor = new EnhancedURLExtractor();
+                this.openaiApiKey = '';  //store the API Key
                 this.init();
             }
 
@@ -917,6 +918,9 @@
             }
 
             getFormData() {
+                const openaiKey = document.getElementById('openaiApiKey').value.trim();
+                this.openaiApiKey = openaiKey; // Store it for later use
+        
                 return {
                     niche: document.getElementById('niche').value.trim(),
                     targetAudience: document.getElementById('targetAudience').value.trim(),
@@ -928,7 +932,7 @@
                         .split(',')
                         .map(k => k.trim())
                         .filter(k => k.length > 0),
-                    openaiApiKey: document.getElementById('openaiApiKey').value.trim()
+                    openaiApiKey: openaiKey
                 };
             }
 
@@ -1191,60 +1195,80 @@
                 const brandingSettings = channel.brandingSettings || {};
                 const status = channel.status || {};
 
-                // Step 2: Fetch About data from Puppeteer server
-                let scrapeData = {};
+                // Step 2: Fetch About data from scraper endpoint
+                let scrapedData = {};
                 try {
                     const scrapeResp = await fetch(`/api/scrape-about?channelId=${channelId}`);
                     if (scrapeResp.ok) {
-                        scrapeData = await scrapeResp.json();
+                        scrapedData = await scrapeResp.json();
+                        console.log(`Scraped data for ${channelId}:`, scrapedData); // Debug log
+                    } else {
+                        console.warn(`Failed to scrape about page for ${channelId}: ${scrapeResp.status}`);
                     }
                 } catch (err) {
                     console.warn(`Failed to fetch /api/scrape-about for ${channelId}:`, err);
                 }
 
-                // Step 3: Extract contact info from scrapeData
-                const email = scrapeData.emails && scrapeData.emails.length > 0 ? scrapeData.emails[0] : '';
-                const website = scrapeData.websites && scrapeData.websites.length > 0 ? scrapeData.websites[0] : '';
-                const socialMedia = scrapeData.social || {};
-                const otherLinks = scrapeData.otherLinks || [];
+                // Step 3: Extract additional info from description using our extractor
+                const descriptionExtraction = this.urlExtractor.extractAllContactInfo(description);
 
-                // Step 4: Check monetization status (description + About + recent videos)
+                // Step 4: Merge all data sources (scraped data takes priority)
+                const mergedEmails = [
+                    ...(scrapedData.emails || []),
+                    ...(descriptionExtraction.emails || [])
+                ].filter((email, index, arr) => arr.indexOf(email) === index); // Remove duplicates
+
+                const mergedWebsites = [
+                    ...(scrapedData.websites || []),
+                    ...(descriptionExtraction.websites || [])
+                ].filter((website, index, arr) => arr.indexOf(website) === index);
+
+                // Merge social media (scraped data takes priority)
+                const mergedSocials = {
+                    instagram: scrapedData.social?.instagram || descriptionExtraction.socialMedia?.instagram || '',
+                    twitter: scrapedData.social?.twitter || descriptionExtraction.socialMedia?.twitter || '',
+                    facebook: scrapedData.social?.facebook || descriptionExtraction.socialMedia?.facebook || '',
+                    tiktok: scrapedData.social?.tiktok || descriptionExtraction.socialMedia?.tiktok || '',
+                    linkedin: scrapedData.social?.linkedin || descriptionExtraction.socialMedia?.linkedin || '',
+                    patreon: scrapedData.social?.patreon || descriptionExtraction.socialMedia?.patreon || '',
+                    discord: scrapedData.social?.discord || descriptionExtraction.socialMedia?.discord || '',
+                    twitch: scrapedData.social?.twitch || descriptionExtraction.socialMedia?.twitch || '',
+                };
+
+                const mergedOtherLinks = [
+                    ...(scrapedData.otherLinks || []),
+                    ...(descriptionExtraction.allUrls || [])
+                ].filter((link, index, arr) => arr.indexOf(link) === index);
+
+                // Step 5: Analyze monetization
                 const monetization = this.analyzeMonetization(
                     description,
                     status,
-                    scrapeData.rawHtml || '',
-                    channel.recentVideos || []
+                    '', // About HTML not needed for this analysis
+                    [] // Recent videos will be added later
                 );
 
-                // Step 5: Return structured info
+                // Step 6: Return structured info
                 return {
-                    aboutHtml: scrapeData.rawHtml || '',
-                    email: email,
-                    website: website,
-                    instagram: socialMedia.instagram || '',
-                    twitter: socialMedia.twitter || '',
-                    facebook: socialMedia.facebook || '',
-                    tiktok: socialMedia.tiktok || '',
-                    linkedin: socialMedia.linkedin || '',
-                    patreon: socialMedia.patreon || '',
-                    kofi: socialMedia.kofi || '',
-                    buymeacoffee: socialMedia.buymeacoffee || '',
-                    discord: socialMedia.discord || '',
-                    twitch: socialMedia.twitch || '',
-                    reddit: socialMedia.reddit || '',
-                    pinterest: socialMedia.pinterest || '',
-                    snapchat: socialMedia.snapchat || '',
-                    threads: socialMedia.threads || '',
-                    onlyfans: socialMedia.onlyfans || '',
-                    substack: socialMedia.substack || '',
-                    medium: socialMedia.medium || '',
-                    github: socialMedia.github || '',
-                    telegram: socialMedia.telegram || '',
-                    otherLinks: otherLinks,
-                    monetization: monetization
+                    email: mergedEmails[0] || '',
+                    emails: mergedEmails,
+                    website: mergedWebsites[0] || '',
+                    websites: mergedWebsites,
+                    instagram: mergedSocials.instagram,
+                    twitter: mergedSocials.twitter,
+                    facebook: mergedSocials.facebook,
+                    tiktok: mergedSocials.tiktok,
+                    linkedin: mergedSocials.linkedin,
+                    patreon: mergedSocials.patreon,
+                    discord: mergedSocials.discord,
+                    twitch: mergedSocials.twitch,
+                    otherLinks: mergedOtherLinks,
+                    monetization: monetization,
+                    emailAvailable: mergedEmails.length > 0,
+                    hasBusinessInquiry: scrapedData.hasBusinessInquiry || false
                 };
             }
-
+            
             analyzeMonetization(description, status, aboutHtml, recentVideos = []) {
                 const monetizationTypes = [];
                 let allText = "";
@@ -1304,7 +1328,7 @@
                     this.updateProgress(80 + (i * progressStep), `Fetching recent videos for ${channel.name}...`);
 
                     try {
-                        // Get last 5 videos (not limited to 30 days anymore)
+                        // Get last 5 videos
                         const videosUrl = `https://www.googleapis.com/youtube/v3/search?part=snippet&channelId=${channel.id}&type=video&order=date&maxResults=5&key=${this.getNextApiKey()}`;
                         const searchResp = await fetch(videosUrl);
                         if (!searchResp.ok) throw new Error(`YouTube API error: ${searchResp.status}`);
@@ -1320,7 +1344,7 @@
                         // Extract video IDs
                         const videoIds = videoItems.map(v => v.id.videoId).join(",");
 
-                        // Fetch video details (for description + stats)
+                        // Fetch video details
                         const detailsUrl = `https://www.googleapis.com/youtube/v3/videos?part=snippet,statistics&id=${videoIds}&key=${this.getNextApiKey()}`;
                         const detailsResp = await fetch(detailsUrl);
                         if (!detailsResp.ok) throw new Error(`YouTube API error: ${detailsResp.status}`);
@@ -1340,72 +1364,29 @@
                         // Pick most recent video for display
                         channel.recentVideo = channel.recentVideos[0];
 
-                        // --- Extract additional contacts from video descriptions ---
-                        let mergedEmails = new Set(channel.email ? [channel.email] : []);
-                        let mergedWebsites = new Set(channel.website ? [channel.website] : []);
-                        let mergedSocials = { ...(channel.socialMedia || {}) };
-                        let mergedOther = new Set(channel.otherLinks || []);
-
-                        for (const v of channel.recentVideos) {
-                            const extraction = this.urlExtractor.extractAllContactInfo(v.description);
-
-                            // Merge emails
-                            (extraction.emails || []).forEach(e => mergedEmails.add(e));
-                            // Merge websites
-                            (extraction.websites || []).forEach(w => mergedWebsites.add(w));
-                            // Merge socials
-                            Object.entries(extraction.socialMedia || {}).forEach(([k, v]) => {
-                                if (v && !mergedSocials[k]) mergedSocials[k] = v;
-                            });
-                            // Merge other links
-                            (extraction.otherLinks || []).forEach(o => mergedOther.add(o));
+                        // Extract additional URLs from video descriptions (but don't overwrite existing data)
+                        const videoUrls = [];
+                        for (const video of channel.recentVideos) {
+                            const videoExtraction = this.urlExtractor.extractAllContactInfo(video.description);
+                            videoUrls.push(...(videoExtraction.allUrls || []));
                         }
 
-                        channel.email = Array.from(mergedEmails)[0] || "";
-                        channel.website = Array.from(mergedWebsites)[0] || "";
-                        channel.socialMedia = mergedSocials;
-                        channel.otherLinks = Array.from(mergedOther);
-
-                        // --- Generate AI outreach subject + first line ---
-                        try {
-                            const outreachResp = await fetch("/api/outreach", {
-                                method: "POST",
-                                headers: { "Content-Type": "application/json" },
-                                body: JSON.stringify({
-                                    channelName: channel.name,
-                                    description: channel.description,
-                                    recentVideos: channel.recentVideos,
-                                    ownerName: channel.name // fallback if no owner known
-                                })
-                            });
-                            if (outreachResp.ok) {
-                                const outreachData = await outreachResp.json();
-                                channel.aiSubjectLine = outreachData.aiSubjectLine || "";
-                                channel.aiFirstLine = outreachData.aiFirstLine || "";
-                            }
-                        } catch (err) {
-                            console.warn("Outreach generation failed:", err);
-                            channel.aiSubjectLine = "";
-                            channel.aiFirstLine = "";
+                        // Only add video URLs if we don't already have social media links
+                        if (!channel.instagram && !channel.twitter && !channel.facebook) {
+                            const videoSocials = this.urlExtractor.categorizeSocialMedia(videoUrls);
+                            channel.instagram = channel.instagram || videoSocials.instagram || '';
+                            channel.twitter = channel.twitter || videoSocials.twitter || '';
+                            channel.facebook = channel.facebook || videoSocials.facebook || '';
+                            channel.tiktok = channel.tiktok || videoSocials.tiktok || '';
+                            channel.linkedin = channel.linkedin || videoSocials.linkedin || '';
+                            channel.patreon = channel.patreon || videoSocials.patreon || '';
                         }
 
-                        // --- Engagement Rate (average of last 5 videos) ---
-                        let engagementRates = [];
-                        for (const v of channel.recentVideos) {
-                            const stats = v.stats;
-                            if (stats && stats.viewCount) {
-                                const views = parseInt(stats.viewCount) || 0;
-                                const likes = parseInt(stats.likeCount) || 0;
-                                const comments = parseInt(stats.commentCount) || 0;
-                                if (views > 0) {
-                                    const rate = ((likes + comments) / views) * 100;
-                                    engagementRates.push(rate);
-                                }
-                            }
-                        }
-                        channel.engagementRate = engagementRates.length > 0
-                            ? engagementRates.reduce((a, b) => a + b, 0) / engagementRates.length
-                            : 0;
+                        // Generate AI outreach
+                        await this.generateOutreachForChannel(channel);
+
+                        // Calculate engagement rate
+                        this.calculateChannelEngagementRate(channel);
 
                         await this.delay(100); // rate limiting
                     } catch (error) {
@@ -1417,7 +1398,74 @@
 
                 return channels;
             }
+            
+            async generateOutreachForChannel(channel) {
+                if (!this.openaiApiKey) {
+                    console.log('No OpenAI API key provided, skipping outreach generation');
+                    channel.aiSubjectLine = "";
+                    channel.aiFirstLine = "";
+                    return;
+                }
 
+                try {
+                    console.log(`Generating outreach for ${channel.name}...`); // Debug log
+            
+                    const outreachResp = await fetch("/api/outreach", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({
+                            channelName: channel.name,
+                            description: channel.description,
+                            recentVideos: channel.recentVideos || [],
+                            ownerName: channel.name,
+                            openaiApiKey: this.openaiApiKey
+                        })
+                    });
+            
+                    if (!outreachResp.ok) {
+                        const errorText = await outreachResp.text();
+                        console.error(`Outreach API error for ${channel.name}:`, errorText);
+                        throw new Error(`API returned ${outreachResp.status}: ${errorText}`);
+                    }
+            
+                    const outreachData = await outreachResp.json();
+                    console.log(`Outreach response for ${channel.name}:`, outreachData); // Debug log
+            
+                    channel.aiSubjectLine = outreachData.aiSubjectLine || "";
+                    channel.aiFirstLine = outreachData.aiFirstLine || "";
+            
+                } catch (err) {
+                    console.error(`Outreach generation failed for ${channel.name}:`, err);
+                    channel.aiSubjectLine = "";
+                    channel.aiFirstLine = "";
+                }
+            }
+            
+            calculateChannelEngagementRate(channel) {
+                if (!channel.recentVideos || channel.recentVideos.length === 0) {
+                    channel.engagementRate = 0;
+                    return;
+                }
+
+                let engagementRates = [];
+                for (const video of channel.recentVideos) {
+                    const stats = video.stats;
+                    if (stats && stats.viewCount) {
+                        const views = parseInt(stats.viewCount) || 0;
+                        const likes = parseInt(stats.likeCount) || 0;
+                        const comments = parseInt(stats.commentCount) || 0;
+                        if (views > 0) {
+                            const rate = ((likes + comments) / views) * 100;
+                            engagementRates.push(rate);
+                        }
+                    }
+                }
+        
+                channel.engagementRate = engagementRates.length > 0
+                    ? engagementRates.reduce((a, b) => a + b, 0) / engagementRates.length
+                    : 0;
+            }
+            
             async analyzeAudienceMatch(channels, targetAudience, openaiApiKey) {
                 const progressStep = 5 / channels.length;
                 
@@ -1494,17 +1542,17 @@
             showResults() {
                 document.getElementById('progressSection').style.display = 'none';
                 document.getElementById('resultsSection').style.display = 'block';
-                
+        
                 // Update results count
                 document.getElementById('resultsCount').textContent = `Found ${this.foundChannels.length} channels`;
-                
+        
                 // Populate results table
                 const tbody = document.getElementById('resultsBody');
                 tbody.innerHTML = '';
-                
+        
                 this.foundChannels.forEach(channel => {
                     const row = document.createElement('tr');
-                    
+            
                     // Format recent video
                     let recentVideoHtml = 'No recent videos';
                     if (channel.recentVideo) {
@@ -1518,66 +1566,23 @@
                             </div>
                         `;
                     }
-                    
-                    // --- Social media + website links (filtered like CSV export) ---
-                    let socialLinksHtml = 'None';
+            
+                    // Build social media links using actual scraped data
+                    const socialLinks = [];
+                    if (channel.website) socialLinks.push(`<a href="${channel.website}" target="_blank" class="social-link">Website</a>`);
+                    if (channel.instagram) socialLinks.push(`<a href="${channel.instagram}" target="_blank" class="social-link">Instagram</a>`);
+                    if (channel.twitter) socialLinks.push(`<a href="${channel.twitter}" target="_blank" class="social-link">Twitter</a>`);
+                    if (channel.facebook) socialLinks.push(`<a href="${channel.facebook}" target="_blank" class="social-link">Facebook</a>`);
+                    if (channel.tiktok) socialLinks.push(`<a href="${channel.tiktok}" target="_blank" class="social-link">TikTok</a>`);
+                    if (channel.linkedin) socialLinks.push(`<a href="${channel.linkedin}" target="_blank" class="social-link">LinkedIn</a>`);
+                    if (channel.discord) socialLinks.push(`<a href="${channel.discord}" target="_blank" class="social-link">Discord</a>`);
+                    if (channel.twitch) socialLinks.push(`<a href="${channel.twitch}" target="_blank" class="social-link">Twitch</a>`);
+                    if (channel.patreon) socialLinks.push(`<a href="${channel.patreon}" target="_blank" class="social-link">Patreon</a>`);
 
-                    try {
-                        const extractor = new EnhancedURLExtractor();
-                        const allText = (channel.description || '') + (channel.aboutHtml || '');
-                        const urls = extractor.extractAllURLs(allText);
-
-                        let website = '';
-                        const socials = {
-                            instagram: '',
-                            twitter: '',
-                            facebook: '',
-                            tiktok: '',
-                            linkedin: '',
-                            discord: '',
-                            twitch: '',
-                            patreon: '',
-                            kofi: ''
-                        };
-
-                        urls.forEach(url => {
-                            const host = new URL(url).hostname.replace(/^www\./, "");
-
-                            if (host.includes("instagram.com")) socials.instagram = url;
-                            else if (host.includes("twitter.com") || host === "x.com") socials.twitter = url;
-                            else if (host.includes("facebook.com")) socials.facebook = url;
-                            else if (host.includes("tiktok.com")) socials.tiktok = url;
-                            else if (host.includes("linkedin.com")) socials.linkedin = url;
-                            else if (host.includes("discord.com")) socials.discord = url;
-                            else if (host.includes("twitch.tv")) socials.twitch = url;
-                            else if (host.includes("patreon.com")) socials.patreon = url;
-                            else if (host.includes("ko-fi.com")) socials.kofi = url;
-                            else {
-                                // First non-social = website
-                                if (!website) website = url;
-                            }
-                        });
-
-                        const links = [];
-
-                        if (website) links.push(`<a href="${website}" target="_blank" class="social-link">Website</a>`);
-                        if (socials.instagram) links.push(`<a href="${socials.instagram}" target="_blank" class="social-link">Instagram</a>`);
-                        if (socials.twitter) links.push(`<a href="${socials.twitter}" target="_blank" class="social-link">Twitter</a>`);
-                        if (socials.facebook) links.push(`<a href="${socials.facebook}" target="_blank" class="social-link">Facebook</a>`);
-                        if (socials.tiktok) links.push(`<a href="${socials.tiktok}" target="_blank" class="social-link">TikTok</a>`);
-                        if (socials.linkedin) links.push(`<a href="${socials.linkedin}" target="_blank" class="social-link">LinkedIn</a>`);
-                        if (socials.discord) links.push(`<a href="${socials.discord}" target="_blank" class="social-link">Discord</a>`);
-                        if (socials.twitch) links.push(`<a href="${socials.twitch}" target="_blank" class="social-link">Twitch</a>`);
-                        if (socials.patreon) links.push(`<a href="${socials.patreon}" target="_blank" class="social-link">Patreon</a>`);
-                        if (socials.kofi) links.push(`<a href="${socials.kofi}" target="_blank" class="social-link">Ko-fi</a>`);
-
-                        if (links.length > 0) {
-                            socialLinksHtml = `<div class="social-links">${links.join('')}</div>`;
-                        }
-                    } catch (err) {
-                        console.warn("Failed to build social links:", err);
-                    }
-                
+                    const socialLinksHtml = socialLinks.length > 0 
+                        ? `<div class="social-links">${socialLinks.join('')}</div>`
+                        : 'None';
+            
                     // Format contact info
                     let contactHtml = 'N/A';
                     if (channel.email) {
@@ -1585,7 +1590,7 @@
                     } else if (channel.website) {
                         contactHtml = `<a href="${channel.website}" target="_blank">Website</a>`;
                     }
-                    
+            
                     row.innerHTML = `
                         <td>
                             <a href="${channel.url}" target="_blank" class="channel-name">
@@ -1616,13 +1621,13 @@
                             ${channel.monetization || 'Unknown'}
                         </td>
                         <td>
-                            ${(channel.otherLinks || []).join(' | ')}
+                            ${(channel.otherLinks || []).slice(0, 3).join(' | ')}
                         </td>
                         <td>
-                            ${channel.hasBusinessInquiry ? 'Yes' : 'No'}
+                            ${channel.emailAvailable ? 'Yes' : 'No'}
                         </td>
                         <td>
-                            ${(channel.description || '').substring(0, 200)}
+                            ${this.escapeHtml(this.truncateText(channel.description || '', 200))}
                         </td>
                         <td>
                             ${this.escapeHtml(channel.aiSubjectLine || '')}
@@ -1634,7 +1639,7 @@
                     tbody.appendChild(row);
                 });
             }
-
+            
             truncateText(text, maxLength) {
                 if (text.length <= maxLength) return text;
                 return text.substring(0, maxLength) + '...';
@@ -1664,7 +1669,7 @@
                     this.showError('No channels to download');
                     return;
                 }
-    
+
                 const headers = [
                     'Channel Name',
                     'Channel URL',
@@ -1689,16 +1694,16 @@
                     'aiSubjectLine',
                     'aiFirstLine'
                 ];
-    
+
                 const csvContent = [
                     headers.join(','),
                     ...this.foundChannels.map(channel => [
-                        `"${channel.name.replace(/"/g, '""')}"`,
-                        channel.url,
-                        channel.subscribers,
-                        channel.engagementRate.toFixed(2),
-                        channel.audienceMatch,
-                        channel.recentVideo ? `"${channel.recentVideo.title.replace(/"/g, '""')}"` : '',
+                        `"${(channel.name || '').replace(/"/g, '""')}"`,
+                        channel.url || '',
+                        channel.subscribers || 0,
+                        (channel.engagementRate || 0).toFixed(2),
+                        channel.audienceMatch || 'Unknown',
+                        channel.recentVideo ? `"${(channel.recentVideo.title || '').replace(/"/g, '""')}"` : '',
                         channel.recentVideo ? channel.recentVideo.url : '',
                         channel.recentVideo ? channel.recentVideo.publishedAt : '',
                         channel.email || '',
@@ -1709,31 +1714,31 @@
                         channel.tiktok || '',
                         channel.linkedin || '',
                         channel.patreon || '',
-                        channel.hasBusinessInquiry ? 'Yes' : 'No',
+                        channel.emailAvailable ? 'Yes' : 'No',
                         `"${(channel.monetization || 'Unknown').replace(/"/g, '""')}"`,
                         `"${(channel.otherLinks && channel.otherLinks.length > 0 
-                              ? channel.otherLinks.join(' | ') 
+                              ? channel.otherLinks.slice(0, 5).join(' | ') 
                               : ''
                             ).replace(/"/g, '""')}"`,
-                        `"${(channel.description || '').replace(/"/g, '""').substring(0, 200)}"`,
+                        `"${(channel.description || '').replace(/"/g, '""').substring(0, 500)}"`,
                         `"${(channel.aiSubjectLine || '').replace(/"/g, '""')}"`,
                         `"${(channel.aiFirstLine || '').replace(/"/g, '""')}"`
                     ].join(','))
                 ].join('\n');
-    
+
                 const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
                 const link = document.createElement('a');
                 const url = URL.createObjectURL(blob);
-    
+
                 link.setAttribute('href', url);
                 link.setAttribute('download', `youtube_channels_${new Date().toISOString().split('T')[0]}.csv`);
                 link.style.visibility = 'hidden';
-    
+
                 document.body.appendChild(link);
                 link.click();
                 document.body.removeChild(link);
             }
-
+            
             resetSearch() {
                 this.foundChannels = [];
                 this.isSearching = false;
@@ -1787,5 +1792,3 @@
     </script>
 </body>
 </html>
-
-
