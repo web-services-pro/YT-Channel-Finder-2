@@ -1,5 +1,31 @@
-// Fixed server.js scraper functions
+import express from "express";
+import cors from "cors";
+import bodyParser from "body-parser";
+import path from "path";
+import { fileURLToPath } from "url";
+import puppeteer from "puppeteer-extra";
+import StealthPlugin from "puppeteer-extra-plugin-stealth";
+import { executablePath } from "puppeteer";
+import { generatePersonalizedOutreach } from "./api/generatePersonalizedOutreach.js";
 
+puppeteer.use(StealthPlugin());
+
+const app = express();
+
+// Middleware
+app.use(cors());
+app.use(bodyParser.json());
+
+// For ES modules (__dirname fix)
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+// Health check
+app.get("/api/health", (req, res) => {
+  res.json({ status: "ok", message: "Server is running 🚀" });
+});
+
+// --- Enhanced scraper helper ---
 async function extractContactInfoFromPage(page) {
   const result = await page.evaluate(() => {
     const uniq = arr => [...new Set(arr.filter(Boolean))];
@@ -158,7 +184,7 @@ async function extractContactInfoFromPage(page) {
   return result;
 }
 
-// Enhanced scrape endpoint with better error handling and logging
+// --- Enhanced Scrape About Page ---
 app.get("/api/scrape-about", async (req, res) => {
   const { channelId } = req.query;
   if (!channelId) return res.status(400).json({ error: "Missing channelId" });
@@ -252,7 +278,41 @@ app.get("/api/scrape-about", async (req, res) => {
   }
 });
 
-// Add a test endpoint to verify scraping is working
+// --- AI Outreach Generation ---
+app.post("/api/outreach", async (req, res) => {
+  try {
+    const { channelName, description, recentVideos, ownerName, openaiApiKey } = req.body;
+
+    console.log(`Outreach request for: ${channelName}`);
+    console.log(`OpenAI key provided: ${!!openaiApiKey}`);
+
+    const outreach = await generatePersonalizedOutreach({
+      channelName,
+      description,
+      recentVideos: recentVideos || [],
+      ownerName: ownerName || "",
+      openaiApiKey: openaiApiKey
+    });
+
+    console.log(`Outreach result for ${channelName}:`, outreach);
+
+    res.json({
+      success: true,
+      aiSubjectLine: outreach.subjectLine,
+      aiFirstLine: outreach.firstLine
+    });
+  } catch (err) {
+    console.error("❌ Outreach error:", err.message);
+    res.status(500).json({ 
+      error: err.message,
+      success: false,
+      aiSubjectLine: "",
+      aiFirstLine: ""
+    });
+  }
+});
+
+// --- Test endpoint to verify scraping is working ---
 app.get("/api/test-scrape", async (req, res) => {
   const testChannelId = "UCofomcxxyhNuZ6qeHzInm3Q"; // From your test data
   
@@ -272,4 +332,16 @@ app.get("/api/test-scrape", async (req, res) => {
       error: err.message
     });
   }
+});
+
+// --- Serve frontend ---
+app.use(express.static(path.join(__dirname, "public")));
+app.get("/", (req, res) => {
+  res.sendFile(path.join(__dirname, "public", "index.html"));
+});
+
+// --- Start server ---
+const PORT = process.env.PORT || 10000;
+app.listen(PORT, () => {
+  console.log(`✅ Server running on port ${PORT}`);
 });
