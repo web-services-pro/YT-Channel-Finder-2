@@ -1,4 +1,4 @@
-// Fixed generatePersonalizedOutreach.js
+// api/generatePersonalizedOutreach.js
 import OpenAI from "openai";
 
 /**
@@ -19,16 +19,14 @@ export async function generatePersonalizedOutreach(channelData) {
   // Check for API key (prefer parameter over environment variable)
   const apiKey = openaiApiKey || process.env.OPENAI_API_KEY;
   if (!apiKey) {
-    console.warn("No OpenAI API key provided");
+    console.warn("⚠️ No OpenAI API key provided");
     return {
       subjectLine: "",
       firstLine: "",
     };
   }
 
-  const openai = new OpenAI({
-    apiKey: apiKey,
-  });
+  const openai = new OpenAI({ apiKey });
 
   // Fallback first name (try ownerName, else first token of channelName)
   const firstName =
@@ -71,7 +69,7 @@ ${videoTitles || "No recent videos available"}
 `;
 
   try {
-    console.log(`Generating outreach for ${channelName} with OpenAI...`);
+    console.log(`🚀 Generating outreach for ${channelName} with OpenAI...`);
     
     const response = await openai.chat.completions.create({
       model: "gpt-4o-mini",
@@ -84,7 +82,7 @@ ${videoTitles || "No recent videos available"}
     });
 
     const content = response.choices[0].message.content;
-    console.log(`OpenAI response for ${channelName}:`, content);
+    console.log(`✅ OpenAI response for ${channelName}:`, content);
     
     const parsed = JSON.parse(content);
 
@@ -95,7 +93,7 @@ ${videoTitles || "No recent videos available"}
   } catch (err) {
     console.error("❌ OpenAI outreach generation failed:", err.message);
     
-    // Return fallback content instead of empty strings
+    // Fallbacks
     const fallbackSubject = recentVideos.length > 0 
       ? `Your ${recentVideos[0].title.split(' ').slice(0, 2).join(' ')} video`
       : `Your ${channelName.split(' ')[0]} content`;
@@ -105,42 +103,8 @@ ${videoTitles || "No recent videos available"}
       : `Hey ${firstName}, came across your channel and noticed that you create interesting content in your niche...`;
     
     return {
-      subjectLine: fallbackSubject.substring(0, 50), // Ensure it's not too long
+      subjectLine: fallbackSubject.substring(0, 50), // Ensure short
       firstLine: fallbackFirstLine,
     };
   }
 }
-
-// Fixed server.js outreach endpoint
-app.post("/api/outreach", async (req, res) => {
-  try {
-    const { channelName, description, recentVideos, ownerName, openaiApiKey } = req.body;
-
-    console.log(`Outreach request for: ${channelName}`);
-    console.log(`OpenAI key provided: ${!!openaiApiKey}`);
-
-    const outreach = await generatePersonalizedOutreach({
-      channelName,
-      description,
-      recentVideos: recentVideos || [],
-      ownerName: ownerName || "",
-      openaiApiKey: openaiApiKey
-    });
-
-    console.log(`Outreach result for ${channelName}:`, outreach);
-
-    res.json({
-      success: true,
-      aiSubjectLine: outreach.subjectLine,
-      aiFirstLine: outreach.firstLine
-    });
-  } catch (err) {
-    console.error("❌ Outreach error:", err.message);
-    res.status(500).json({ 
-      error: err.message,
-      success: false,
-      aiSubjectLine: "",
-      aiFirstLine: ""
-    });
-  }
-});
