@@ -3,12 +3,11 @@ import cors from "cors";
 import bodyParser from "body-parser";
 import path from "path";
 import { fileURLToPath } from "url";
-import { generatePersonalizedOutreach } from "./api/generatePersonalizedOutreach.js";
-
-// --- Puppeteer with stealth ---
 import puppeteer from "puppeteer-extra";
 import StealthPlugin from "puppeteer-extra-plugin-stealth";
 import { executablePath } from "puppeteer";
+import { generatePersonalizedOutreach } from "./api/generatePersonalizedOutreach.js";
+
 puppeteer.use(StealthPlugin());
 
 const app = express();
@@ -21,28 +20,45 @@ app.use(bodyParser.json());
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// Health check endpoint
+// Health check
 app.get("/api/health", (req, res) => {
   res.json({ status: "ok", message: "Server is running 🚀" });
 });
 
-// --- Enhanced extractor run inside page.evaluate ---
+// --- Scraper helpers ---
 async function extractContactInfoFromPage(page) {
-  return await page.evaluate(() => {
+  const result = await page.evaluate(() => {
     const uniq = arr => [...new Set(arr.filter(Boolean))];
 
-    // --- Emails ---
-    const emailRegex =
-      /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g;
+    // Email regex
+    const emailRegex = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g;
     const pageText = document.body ? document.body.innerText : "";
     const emails = (pageText.match(emailRegex) || []).map(e => e.toLowerCase());
 
-    // --- Social links from YouTube external link container ---
-    const socialMediaLinks = Array.from(
-      document.querySelectorAll(".yt-channel-external-link-view-model-wiz__container a")
-    ).map(link => link.href);
+    // Detect "business inquiry"
+    const hasBusinessInquiry = (() => {
+      try {
+        const btn = Array.from(document.querySelectorAll("tp-yt-paper-button, button, a"))
+          .find(el =>
+            (el.innerText || "").toLowerCase().includes("business inquiry") ||
+            (el.innerText || "").toLowerCase().includes("business inquiries")
+          );
+        if (btn) return true;
 
-    // --- JSON-LD sameAs links ---
+        const mailAnchor = Array.from(document.querySelectorAll('a[href^="mailto:"]')).length > 0;
+        if (mailAnchor) return true;
+      } catch {
+        // ignore
+      }
+      return false;
+    })();
+
+    // Collect anchor links
+    const anchors = Array.from(document.querySelectorAll("a[href]"))
+      .map(a => a.href)
+      .filter(Boolean);
+
+    // Collect links from JSON-LD
     const jsonLd = Array.from(document.querySelectorAll('script[type="application/ld+json"]'))
       .map(s => {
         try {
@@ -68,9 +84,9 @@ async function extractContactInfoFromPage(page) {
       }
     });
 
-    const allLinks = socialMediaLinks.concat(sameAsLinks);
+    const allLinks = anchors.concat(sameAsLinks);
 
-    // --- Classify links ---
+    // Social link detection
     const social = {};
     const websites = [];
     const otherLinks = [];
@@ -84,7 +100,6 @@ async function extractContactInfoFromPage(page) {
         if (host.includes("tiktok.com")) return "tiktok";
         if (host.includes("linkedin.com")) return "linkedin";
         if (host.includes("patreon.com")) return "patreon";
-        if (host.includes("ko-fi.com") || host.includes("kofi.com")) return "kofi";
         if (host.includes("discord.gg") || host.includes("discord.com")) return "discord";
         if (host.includes("twitch.tv")) return "twitch";
         // ignore YT + image/CDN
@@ -115,18 +130,34 @@ async function extractContactInfoFromPage(page) {
       social,
       websites: uniq(websites),
       otherLinks: uniq(otherLinks),
-      hasBusinessInquiry: socialMediaLinks.length > 0
+      hasBusinessInquiry
     };
   });
+
+  // Competitor-style scraping of visible external links
+  const socialLinks = await page.$$eval(
+    ".yt-channel-external-link-view-model-wiz__container a",
+    links => links.map(link => link.href)
+  );
+
+  if (socialLinks && socialLinks.length > 0) {
+    socialLinks.forEach(href => {
+      if (href.includes("instagram.com")) result.social.instagram = href;
+      else if (href.includes("twitter.com") || href.includes("x.com")) result.social.twitter = href;
+      else if (href.includes("facebook.com")) result.social.facebook = href;
+      else if (href.includes("tiktok.com")) result.social.tiktok = href;
+      else if (href.includes("linkedin.com")) result.social.linkedin = href;
+      else result.otherLinks.push(href);
+    });
+  }
+
+  return result;
 }
 
-// Puppeteer-based scrape-about route
+// --- Scrape About Page ---
 app.get("/api/scrape-about", async (req, res) => {
   const { channelId } = req.query;
-
-  if (!channelId) {
-    return res.status(400).json({ error: "Missing channelId parameter" });
-  }
+  if (!channelId) return res.status(400).json({ error: "Missing channelId" });
 
   let browser;
   try {
@@ -142,16 +173,11 @@ app.get("/api/scrape-about", async (req, res) => {
     );
 
     const url = `https://www.youtube.com/channel/${channelId}/about`;
-    await page.goto(url, { waitUntil: "networkidle2", timeout: 30000 });
-    await page.waitForTimeout(3000);
+    await page.goto(url, { waitUntil: "networkidle2", timeout: 60000 });
 
     const contacts = await extractContactInfoFromPage(page);
 
-    res.json({
-      channelId,
-      aboutUrl: url,
-      ...contacts
-    });
+    res.json({ channelId, aboutUrl: url, ...contacts });
   } catch (err) {
     console.error("❌ Error scraping channel:", err.message);
     res.status(500).json({ error: err.message });
@@ -160,7 +186,7 @@ app.get("/api/scrape-about", async (req, res) => {
   }
 });
 
-// --- AI Outreach endpoint ---
+// --- AI Outreach ---
 app.post("/api/outreach", async (req, res) => {
   try {
     const { channelName, description, recentVideos, ownerName } = req.body;
@@ -178,19 +204,18 @@ app.post("/api/outreach", async (req, res) => {
       aiFirstLine: outreach.firstLine
     });
   } catch (err) {
-    console.error("❌ Error generating outreach:", err.message);
+    console.error("❌ Outreach error:", err.message);
     res.status(500).json({ error: err.message });
   }
 });
 
-// --- Serve frontend --- //
+// --- Serve frontend ---
 app.use(express.static(path.join(__dirname, "public")));
-
 app.get("/", (req, res) => {
   res.sendFile(path.join(__dirname, "public", "index.html"));
 });
 
-// Port binding
+// --- Start server ---
 const PORT = process.env.PORT || 10000;
 app.listen(PORT, () => {
   console.log(`✅ Server running on port ${PORT}`);
