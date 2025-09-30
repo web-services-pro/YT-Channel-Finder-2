@@ -278,36 +278,61 @@ app.get("/api/scrape-about", async (req, res) => {
       timeout: 60000
     };
 
-    // Try to find Chromium - CHECK PUPPETEER CACHE FIRST
-    const possiblePaths = [
-      // Puppeteer's cache locations (most likely on Render)
-      '/opt/render/.cache/puppeteer/chrome/linux-127.0.6533.88/chrome-linux64/chrome',
-      '/opt/render/.cache/puppeteer/chrome/linux-131.0.6778.87/chrome-linux64/chrome',
-      // System Chrome installations
-      '/usr/bin/chromium-browser',
-      '/usr/bin/chromium',
-      '/usr/bin/google-chrome',
-      '/usr/bin/google-chrome-stable',
-      process.env.PUPPETEER_EXECUTABLE_PATH
-    ].filter(Boolean);
-
-    // Always check for executablePath in cloud environments
+    // Dynamically find Chrome in Puppeteer cache
     const fs = await import('fs');
-    for (const path of possiblePaths) {
-      try {
-        if (fs.existsSync(path)) {
-          launchOptions.executablePath = path;
-          console.log(`✅ Found Chromium at: ${path}`);
-          break;
+    let foundChrome = false;
+
+    // First, try to scan the puppeteer cache directory for ANY chrome version
+    const puppeteerCachePath = '/opt/render/.cache/puppeteer/chrome';
+    try {
+      if (fs.existsSync(puppeteerCachePath)) {
+        const versions = fs.readdirSync(puppeteerCachePath);
+        console.log(`📁 Found Chrome versions in cache:`, versions);
+    
+        // Sort versions to get the latest
+        const sortedVersions = versions.sort().reverse();
+    
+        for (const version of sortedVersions) {
+          const chromePath = `${puppeteerCachePath}/${version}/chrome-linux64/chrome`;
+          if (fs.existsSync(chromePath)) {
+            launchOptions.executablePath = chromePath;
+            console.log(`✅ Found Chromium at: ${chromePath}`);
+            foundChrome = true;
+            break;
+          }
         }
-      } catch (e) {
-        console.warn(`Failed to check path ${path}:`, e.message);
+      }
+    } catch (err) {
+      console.warn('Could not scan puppeteer cache:', err.message);
+    }
+
+    // Fallback to system Chrome if not found in cache
+    if (!foundChrome) {
+      const systemPaths = [
+        '/usr/bin/chromium-browser',
+        '/usr/bin/chromium',
+        '/usr/bin/google-chrome',
+        '/usr/bin/google-chrome-stable',
+        process.env.PUPPETEER_EXECUTABLE_PATH
+      ].filter(Boolean);
+  
+      for (const path of systemPaths) {
+        try {
+          if (fs.existsSync(path)) {
+            launchOptions.executablePath = path;
+            console.log(`✅ Found system Chrome at: ${path}`);
+            foundChrome = true;
+            break;
+          }
+        } catch (e) {
+          console.warn(`Failed to check path ${path}:`, e.message);
+        }
       }
     }
 
-    // If still no executable found, log all checked paths
-    if (!launchOptions.executablePath) {
-      console.error('❌ No Chromium executable found. Checked paths:', possiblePaths);
+    // If still no executable found, throw error
+    if (!foundChrome) {
+      console.error('❌ No Chromium executable found anywhere');
       throw new Error('Chromium executable not found. Please ensure build command ran successfully.');
     }
 
