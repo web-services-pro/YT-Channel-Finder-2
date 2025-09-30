@@ -550,7 +550,10 @@
                         const jsonString = JSON.stringify(data);
                         const matches = [...jsonString.matchAll(/"url":"(https?:\/\/[^"]+)"/g)];
                         for (const m of matches) {
-                            urls.add(decodeURIComponent(m[1]));
+                            const decodedUrl = decodeURIComponent(m[1]);
+                            // Clean up Google redirect URLs
+                            const cleanUrl = decodedUrl.replace(/^https?:\/\/www\.google\.com\/url\?q=([^&]+).*/, '$1');
+                            urls.add(cleanUrl);
                         }
                     }
                 } catch (err) {
@@ -559,29 +562,31 @@
 
                 // --- Existing regex fallback (for descriptions, comments, etc.) ---
                 const urlPatterns = [
-                    /https?:\/\/[^\s"'<>]+/gi,
-                    /www\.[^\s"'<>]+/gi
+                    /https?:\/\/[^\s"'<>)]+/gi,
+                    /(?:^|\s)www\.[^\s"'<>)]+/gi
                 ];
 
                 for (const pattern of urlPatterns) {
                     const matches = text.match(pattern);
                     if (matches) {
                         matches.forEach(u => {
-                            if (!u.startsWith("http")) u = "https://" + u;
-                            urls.add(u);
+                            let cleanUrl = u.trim();
+                            // Remove trailing punctuation
+                            cleanUrl = cleanUrl.replace(/[.,;:!?)\]]+$/, '');
+                            if (!cleanUrl.startsWith("http")) cleanUrl = "https://" + cleanUrl;
+                            urls.add(cleanUrl);
                         });
                     }
                 }
 
-                // --- Filter unwanted YouTube/CDN/internal links ---
+                // --- Enhanced filtering ---
                 const allowedDomains = [
-                  "instagram.com",
-                  "facebook.com",
-                  "twitter.com",
-                  "x.com", // Twitter rebrand
+                  "instagram.com", "instagr.am", "ig.me",
+                  "facebook.com", "fb.com", "fb.me",
+                  "twitter.com", "x.com",
                   "tiktok.com",
                   "linkedin.com",
-                  "discord.com",
+                  "discord.com", "discord.gg",
                   "twitch.tv",
                   "patreon.com",
                   "ko-fi.com",
@@ -590,40 +595,63 @@
                   "substack.com",
                   "medium.com",
                   "github.com",
-                  "telegram.me",
-                  "t.me",
+                  "telegram.me", "t.me",
                   "pinterest.com",
                   "snapchat.com",
-                  "threads.net"
+                  "threads.net",
+                  "reddit.com"
                 ];
 
                 function isAllowed(url) {
                   try {
-                    const host = new URL(url).hostname.replace(/^www\./, "");
+                    const urlObj = new URL(url);
+                    const host = urlObj.hostname.replace(/^www\./, "").toLowerCase();
+        
                     // Block YouTube/Google/CDN
                     if (
-                      host.endsWith("youtube.com") ||
-                      host.endsWith("ytimg.com") ||
-                      host.endsWith("googleusercontent.com") ||
-                      host.endsWith("ggpht.com")
+                      host.includes("youtube.com") ||
+                      host.includes("youtu.be") ||
+                      host.includes("ytimg.com") ||
+                      host.includes("googleusercontent.com") ||
+                      host.includes("ggpht.com") ||
+                      host.includes("google.com")
                     ) {
                       return false;
                     }
+        
                     // Allow listed social domains
                     if (allowedDomains.some(domain => host.includes(domain))) {
                       return true;
                     }
-                    // ✅ Allow generic websites if not YouTube/CDN
+        
+                    // Allow other websites (not social media or YouTube)
                     return true;
                   } catch (e) {
                     return false;
                   }
                 }
 
-                return Array.from(urls).filter(isAllowed);
+                const filteredUrls = Array.from(urls).filter(isAllowed);
+    
+                // Remove duplicates by normalizing URLs
+                const normalizedUrls = new Map();
+                filteredUrls.forEach(url => {
+                    try {
+                        const urlObj = new URL(url);
+                        // Normalize by removing trailing slashes and query params for deduplication
+                        const normalized = urlObj.origin + urlObj.pathname.replace(/\/$/, '');
+                        if (!normalizedUrls.has(normalized)) {
+                            normalizedUrls.set(normalized, url);
+                        }
+                    } catch (e) {
+                        // Keep malformed URLs as-is
+                        normalizedUrls.set(url, url);
+                    }
+                });
 
+                return Array.from(normalizedUrls.values());
             }
-
+            
             // Enhanced section detection
             extractLinksSections(description) {
                 const sections = [];
@@ -702,30 +730,41 @@
             // Enhanced social media categorization
             categorizeSocialMedia(urls) {
                 const results = {};
-                
+    
                 // Initialize all platforms
                 Object.keys(this.socialPlatforms).forEach(platform => {
                     results[platform] = '';
                 });
 
-                // Categorize each URL
+                // Categorize each URL - ONLY keep the first match per platform
                 urls.forEach(url => {
                     Object.entries(this.socialPlatforms).forEach(([platform, config]) => {
-                        if (!results[platform]) { // Only set if not already found
-                            config.patterns.forEach(pattern => {
-                                // Reset lastIndex to ensure we start from the beginning
-                                pattern.lastIndex = 0;
-                                if (pattern.test(url)) {
-                                    results[platform] = url;
-                                }
-                            });
-                        }
+                        if (results[platform]) return; // Skip if already found
+            
+                        config.patterns.forEach(pattern => {
+                            // Reset lastIndex to ensure we start from the beginning
+                            pattern.lastIndex = 0;
+                            const match = url.match(pattern);
+                            if (match) {
+                                // Store the full URL, not just the matched part
+                                results[platform] = url;
+                            }
+                        });
                     });
                 });
 
+                // Log what was found for debugging
+                const foundPlatforms = Object.entries(results)
+                    .filter(([_, url]) => url)
+                    .map(([platform, _]) => platform);
+    
+                if (foundPlatforms.length > 0) {
+                    console.log(`Found social media: ${foundPlatforms.join(', ')}`);
+                }
+
                 return results;
             }
-
+            
             // Enhanced website detection
             findWebsites(urls, socialMediaResults) {
                 const socialUrls = new Set(Object.values(socialMediaResults).filter(url => url));
