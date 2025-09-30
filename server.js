@@ -5,15 +5,6 @@ import path from "path";
 import { fileURLToPath } from "url";
 import { generatePersonalizedOutreach } from "./api/generatePersonalizedOutreach.js";
 
-// Environment variables
-const YOUTUBE_API_KEYS = process.env.YOUTUBE_API_KEY 
-  ? process.env.YOUTUBE_API_KEY.split(',').map(k => k.trim()).filter(k => k.length > 0)
-  : [];
-const OPENAI_API_KEY = process.env.OPENAI_API_KEY || '';
-
-console.log(`✅ YouTube API Keys loaded: ${YOUTUBE_API_KEYS.length} keys`);
-console.log(`✅ OpenAI API Key loaded: ${!!OPENAI_API_KEY}`);
-
 // Dynamic imports for puppeteer to handle cloud deployment issues
 let puppeteer;
 let StealthPlugin;
@@ -27,8 +18,25 @@ try {
   console.log("✅ Puppeteer loaded successfully");
 } catch (error) {
   console.warn("⚠️ Puppeteer failed to load:", error.message);
-  puppeteer = null;
+  // Try fallback to regular puppeteer
+  try {
+    puppeteer = await import("puppeteer");
+    puppeteer = puppeteer.default;
+    console.log("✅ Fallback to regular Puppeteer successful");
+  } catch (fallbackError) {
+    console.error("❌ All Puppeteer options failed:", fallbackError.message);
+    puppeteer = null;
+  }
 }
+
+// Environment variables
+const YOUTUBE_API_KEYS = process.env.YOUTUBE_API_KEY 
+  ? process.env.YOUTUBE_API_KEY.split(',').map(k => k.trim()).filter(k => k.length > 0)
+  : [];
+const OPENAI_API_KEY = process.env.OPENAI_API_KEY || '';
+
+console.log(`✅ YouTube API Keys loaded: ${YOUTUBE_API_KEYS.length} keys`);
+console.log(`✅ OpenAI API Key loaded: ${!!OPENAI_API_KEY}`);
 
 const app = express();
 
@@ -250,8 +258,8 @@ app.get("/api/scrape-about", async (req, res) => {
   try {
     console.log(`Starting scrape for channel: ${channelId}`);
     
-    // Cloud-optimized browser launch
-    browser = await puppeteer.launch({
+    // Cloud-optimized browser launch with Chromium executable detection
+    const launchOptions = {
       headless: "new",
       args: [
         "--no-sandbox", 
@@ -265,11 +273,43 @@ app.get("/api/scrape-about", async (req, res) => {
         "--disable-backgrounding-occluded-windows",
         "--disable-renderer-backgrounding",
         "--disable-features=TranslateUI",
-        "--disable-ipc-flooding-protection",
-        "--single-process" // Important for some cloud environments
+        "--disable-ipc-flooding-protection"
       ],
       timeout: 60000
-    });
+    };
+
+    // Try to find Chromium in common Render.com locations
+    const possiblePaths = [
+      '/usr/bin/chromium-browser',
+      '/usr/bin/chromium',
+      '/usr/bin/google-chrome',
+      '/usr/bin/google-chrome-stable',
+      process.env.PUPPETEER_EXECUTABLE_PATH
+    ].filter(Boolean);
+
+    // Check if we need to specify executablePath
+    if (process.env.RENDER || process.env.NODE_ENV === 'production') {
+      // Try to find an available chromium executable
+      const fs = await import('fs');
+      for (const path of possiblePaths) {
+        try {
+          if (fs.existsSync(path)) {
+            launchOptions.executablePath = path;
+            console.log(`✅ Found Chromium at: ${path}`);
+            break;
+          }
+        } catch (e) {
+          // Continue checking
+        }
+      }
+      
+      // If no executable found, log warning but try to launch anyway
+      if (!launchOptions.executablePath) {
+        console.warn('⚠️ No Chromium executable found in standard paths, attempting default launch');
+      }
+    }
+
+    browser = await puppeteer.launch(launchOptions);
 
     const page = await browser.newPage();
     
@@ -302,7 +342,7 @@ app.get("/api/scrape-about", async (req, res) => {
     // Extract contact information
     const contacts = await extractContactInfoFromPage(page);
     
-    console.log(`Scrape results for ${channelId}:`, {
+    console.log(`✅ Scrape results for ${channelId}:`, {
       emailsFound: contacts.emails.length,
       websitesFound: contacts.websites.length,
       socialLinksFound: contacts.socialLinksFound,
@@ -348,7 +388,7 @@ app.post("/api/outreach", async (req, res) => {
   try {
     const { channelName, description, recentVideos, ownerName } = req.body;
 
-    console.log(`Outreach request for: ${channelName}`);
+    console.log(`🚀 Outreach request for: ${channelName}`);
     console.log(`Using server-side OpenAI key: ${!!OPENAI_API_KEY}`);
 
     const outreach = await generatePersonalizedOutreach({
@@ -359,7 +399,7 @@ app.post("/api/outreach", async (req, res) => {
       openaiApiKey: OPENAI_API_KEY  // Use server-side key
     });
 
-    console.log(`Outreach result for ${channelName}:`, outreach);
+    console.log(`✅ Outreach result for ${channelName}:`, outreach);
 
     res.json({
       success: true,
