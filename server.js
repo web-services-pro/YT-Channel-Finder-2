@@ -278,8 +278,12 @@ app.get("/api/scrape-about", async (req, res) => {
       timeout: 60000
     };
 
-    // Try to find Chromium in common Render.com locations
+    // Try to find Chromium - CHECK PUPPETEER CACHE FIRST
     const possiblePaths = [
+      // Puppeteer's cache locations (most likely on Render)
+      '/opt/render/.cache/puppeteer/chrome/linux-127.0.6533.88/chrome-linux64/chrome',
+      '/opt/render/.cache/puppeteer/chrome/linux-131.0.6778.87/chrome-linux64/chrome',
+      // System Chrome installations
       '/usr/bin/chromium-browser',
       '/usr/bin/chromium',
       '/usr/bin/google-chrome',
@@ -287,30 +291,28 @@ app.get("/api/scrape-about", async (req, res) => {
       process.env.PUPPETEER_EXECUTABLE_PATH
     ].filter(Boolean);
 
-    // Check if we need to specify executablePath
-    if (process.env.RENDER || process.env.NODE_ENV === 'production') {
-      // Try to find an available chromium executable
-      const fs = await import('fs');
-      for (const path of possiblePaths) {
-        try {
-          if (fs.existsSync(path)) {
-            launchOptions.executablePath = path;
-            console.log(`✅ Found Chromium at: ${path}`);
-            break;
-          }
-        } catch (e) {
-          // Continue checking
+    // Always check for executablePath in cloud environments
+    const fs = await import('fs');
+    for (const path of possiblePaths) {
+      try {
+        if (fs.existsSync(path)) {
+          launchOptions.executablePath = path;
+          console.log(`✅ Found Chromium at: ${path}`);
+          break;
         }
-      }
-      
-      // If no executable found, log warning but try to launch anyway
-      if (!launchOptions.executablePath) {
-        console.warn('⚠️ No Chromium executable found in standard paths, attempting default launch');
+      } catch (e) {
+        console.warn(`Failed to check path ${path}:`, e.message);
       }
     }
 
-    browser = await puppeteer.launch(launchOptions);
+    // If still no executable found, log all checked paths
+    if (!launchOptions.executablePath) {
+      console.error('❌ No Chromium executable found. Checked paths:', possiblePaths);
+      throw new Error('Chromium executable not found. Please ensure build command ran successfully.');
+    }
 
+    browser = await puppeteer.launch(launchOptions);
+    
     const page = await browser.newPage();
     
     // Set realistic user agent and viewport
