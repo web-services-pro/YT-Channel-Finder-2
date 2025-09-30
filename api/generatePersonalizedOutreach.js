@@ -19,13 +19,15 @@ export async function generatePersonalizedOutreach(channelData) {
   // Check for API key (prefer parameter over environment variable)
   const apiKey = openaiApiKey || process.env.OPENAI_API_KEY;
   if (!apiKey) {
-    console.warn("⚠️ No OpenAI API key provided");
+    console.warn(`⚠️ No OpenAI API key provided for ${channelName}`);
     return {
       subjectLine: "",
       firstLine: "",
     };
   }
 
+  console.log(`✅ Using OpenAI API key for ${channelName}: ${apiKey.substring(0, 10)}...`);
+  
   const openai = new OpenAI({ apiKey });
 
   // Fallback first name (try ownerName, else first token of channelName)
