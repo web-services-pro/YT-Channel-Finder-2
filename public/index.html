@@ -1211,8 +1211,12 @@
                     patreon: scrapedData.social?.patreon || descriptionExtraction.socialMedia?.patreon || '',
                     discord: scrapedData.social?.discord || descriptionExtraction.socialMedia?.discord || '',
                     twitch: scrapedData.social?.twitch || descriptionExtraction.socialMedia?.twitch || '',
+                    kofi: scrapedData.social?.kofi || descriptionExtraction.socialMedia?.kofi || '',
+                    buymeacoffee: scrapedData.social?.buymeacoffee || descriptionExtraction.socialMedia?.buymeacoffee || '',
                 };
 
+                console.log(`Social media extracted for channel:`, mergedSocials); // Debug log
+                
                 const mergedOtherLinks = [
                     ...(scrapedData.otherLinks || []),
                     ...(descriptionExtraction.allUrls || [])
@@ -1378,16 +1382,9 @@
             }
             
             async generateOutreachForChannel(channel) {
-                if (!this.openaiApiKey) {
-                    console.log('No OpenAI API key provided, skipping outreach generation');
-                    channel.aiSubjectLine = "";
-                    channel.aiFirstLine = "";
-                    return;
-                }
-
                 try {
-                    console.log(`Generating outreach for ${channel.name}...`); // Debug log
-            
+                    console.log(`🎯 Starting outreach generation for ${channel.name}...`);
+        
                     const outreachResp = await fetch("/api/outreach", {
                         method: "POST",
                         headers: { "Content-Type": "application/json" },
@@ -1396,24 +1393,29 @@
                             description: channel.description,
                             recentVideos: channel.recentVideos || [],
                             ownerName: channel.name
-                            // No openaiApiKey needed - server will use env variable
                         })
                     });
-            
+
                     if (!outreachResp.ok) {
                         const errorText = await outreachResp.text();
-                        console.error(`Outreach API error for ${channel.name}:`, errorText);
+                        console.error(`❌ Outreach API error for ${channel.name}:`, errorText);
                         throw new Error(`API returned ${outreachResp.status}: ${errorText}`);
                     }
-            
+
                     const outreachData = await outreachResp.json();
-                    console.log(`Outreach response for ${channel.name}:`, outreachData); // Debug log
-            
-                    channel.aiSubjectLine = outreachData.aiSubjectLine || "";
-                    channel.aiFirstLine = outreachData.aiFirstLine || "";
-            
+                    console.log(`✅ Outreach response for ${channel.name}:`, outreachData);
+
+                    // Ensure we're setting the correct properties
+                    channel.aiSubjectLine = outreachData.aiSubjectLine || outreachData.subjectLine || "";
+                    channel.aiFirstLine = outreachData.aiFirstLine || outreachData.firstLine || "";
+        
+                    console.log(`✅ Set AI fields for ${channel.name}:`, {
+                        aiSubjectLine: channel.aiSubjectLine,
+                        aiFirstLine: channel.aiFirstLine
+                    });
+
                 } catch (err) {
-                    console.error(`Outreach generation failed for ${channel.name}:`, err);
+                    console.error(`❌ Outreach generation failed for ${channel.name}:`, err);
                     channel.aiSubjectLine = "";
                     channel.aiFirstLine = "";
                 }
