@@ -5,6 +5,15 @@ import path from "path";
 import { fileURLToPath } from "url";
 import { generatePersonalizedOutreach } from "./api/generatePersonalizedOutreach.js";
 
+// Environment variables
+const YOUTUBE_API_KEYS = process.env.YOUTUBE_API_KEY 
+  ? process.env.YOUTUBE_API_KEY.split(',').map(k => k.trim()).filter(k => k.length > 0)
+  : [];
+const OPENAI_API_KEY = process.env.OPENAI_API_KEY || '';
+
+console.log(`✅ YouTube API Keys loaded: ${YOUTUBE_API_KEYS.length} keys`);
+console.log(`✅ OpenAI API Key loaded: ${!!OPENAI_API_KEY}`);
+
 // Dynamic imports for puppeteer to handle cloud deployment issues
 let puppeteer;
 let StealthPlugin;
@@ -41,6 +50,23 @@ app.get("/api/health", (req, res) => {
     nodeVersion: process.version,
     platform: process.platform
   });
+});
+
+// API keys availability check
+app.get("/api/keys-status", (req, res) => {
+  res.json({
+    youtubeKeysAvailable: YOUTUBE_API_KEYS.length > 0,
+    youtubeKeysCount: YOUTUBE_API_KEYS.length,
+    openaiKeyAvailable: !!OPENAI_API_KEY
+  });
+});
+
+// Provide YouTube API keys for frontend
+app.get("/api/youtube-keys", (req, res) => {
+  if (YOUTUBE_API_KEYS.length === 0) {
+    return res.status(503).json({ error: "No YouTube API keys configured" });
+  }
+  res.json({ keys: YOUTUBE_API_KEYS });
 });
 
 // --- Enhanced scraper helper ---
@@ -320,17 +346,17 @@ app.get("/api/scrape-about", async (req, res) => {
 // --- AI Outreach Generation ---
 app.post("/api/outreach", async (req, res) => {
   try {
-    const { channelName, description, recentVideos, ownerName, openaiApiKey } = req.body;
+    const { channelName, description, recentVideos, ownerName } = req.body;
 
     console.log(`Outreach request for: ${channelName}`);
-    console.log(`OpenAI key provided: ${!!openaiApiKey}`);
+    console.log(`Using server-side OpenAI key: ${!!OPENAI_API_KEY}`);
 
     const outreach = await generatePersonalizedOutreach({
       channelName,
       description,
       recentVideos: recentVideos || [],
       ownerName: ownerName || "",
-      openaiApiKey: openaiApiKey
+      openaiApiKey: OPENAI_API_KEY  // Use server-side key
     });
 
     console.log(`Outreach result for ${channelName}:`, outreach);
