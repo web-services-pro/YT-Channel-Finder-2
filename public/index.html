@@ -1349,15 +1349,30 @@
                     this.updateProgress(80 + (i * progressStep), `Fetching recent videos for ${channel.name}...`);
 
                     try {
-                        // Get last 5 videos
+                        // Fetch videos and comments from new endpoint
+                        const channelDataResp = await fetch(`/api/channel-data?channelId=${channel.id}`);
+            
+                        if (!channelDataResp.ok) {
+                            throw new Error(`Failed to fetch channel data: ${channelDataResp.status}`);
+                        }
+            
+                        const channelData = await channelDataResp.json();
+            
+                        if (!channelData.success) {
+                            throw new Error('Channel data fetch unsuccessful');
+                        }
+
+                        // Now fetch full video details for engagement rate calculation
                         const videosUrl = `https://www.googleapis.com/youtube/v3/search?part=snippet&channelId=${channel.id}&type=video&order=date&maxResults=5&key=${this.getNextApiKey()}`;
                         const searchResp = await fetch(videosUrl);
                         if (!searchResp.ok) throw new Error(`YouTube API error: ${searchResp.status}`);
 
                         const searchData = await searchResp.json();
                         const videoItems = searchData.items || [];
+            
                         if (videoItems.length === 0) {
                             channel.recentVideos = [];
+                            channel.recentComments = [];
                             channel.recentVideo = null;
                             continue;
                         }
@@ -1382,6 +1397,11 @@
                             stats: v.statistics || {}
                         }));
 
+                        // Store comments for outreach generation
+                        channel.recentComments = channelData.recentComments || [];
+            
+                        console.log(`Fetched ${channel.recentComments.length} comments for ${channel.name}`);
+
                         // Pick most recent video for display
                         channel.recentVideo = channel.recentVideos[0];
 
@@ -1403,7 +1423,7 @@
                             channel.patreon = channel.patreon || videoSocials.patreon || '';
                         }
 
-                        // Generate AI outreach
+                        // Generate AI outreach (now with comments)
                         await this.generateOutreachForChannel(channel);
 
                         // Calculate engagement rate
@@ -1411,18 +1431,19 @@
 
                         await this.delay(100); // rate limiting
                     } catch (error) {
-                        console.warn(`Failed to fetch recent videos for ${channel.name}:`, error.message);
+                        console.warn(`Failed to fetch data for ${channel.name}:`, error.message);
                         channel.recentVideos = [];
+                        channel.recentComments = [];
                         channel.recentVideo = null;
                     }
                 }
 
                 return channels;
             }
-            
+                        
             async generateOutreachForChannel(channel) {
                 try {
-                    console.log(`🎯 Starting outreach generation for ${channel.name}...`);
+                    console.log(`Starting outreach generation for ${channel.name}...`);
         
                     const outreachResp = await fetch("/api/outreach", {
                         method: "POST",
@@ -1431,30 +1452,32 @@
                             channelName: channel.name,
                             description: channel.description,
                             recentVideos: channel.recentVideos || [],
+                            recentComments: channel.recentComments || [], 
                             ownerName: channel.name
                         })
                     });
 
                     if (!outreachResp.ok) {
                         const errorText = await outreachResp.text();
-                        console.error(`❌ Outreach API error for ${channel.name}:`, errorText);
+                        console.error(`Outreach API error for ${channel.name}:`, errorText);
                         throw new Error(`API returned ${outreachResp.status}: ${errorText}`);
                     }
 
                     const outreachData = await outreachResp.json();
-                    console.log(`✅ Outreach response for ${channel.name}:`, outreachData);
+                    console.log(`Outreach response for ${channel.name}:`, outreachData);
 
                     // Ensure we're setting the correct properties
                     channel.aiSubjectLine = outreachData.aiSubjectLine || outreachData.subjectLine || "";
                     channel.aiFirstLine = outreachData.aiFirstLine || outreachData.firstLine || "";
         
-                    console.log(`✅ Set AI fields for ${channel.name}:`, {
+                    console.log(`Set AI fields for ${channel.name}:`, {
                         aiSubjectLine: channel.aiSubjectLine,
-                        aiFirstLine: channel.aiFirstLine
+                        aiFirstLine: channel.aiFirstLine,
+                        commentsUsed: (channel.recentComments || []).length
                     });
 
                 } catch (err) {
-                    console.error(`❌ Outreach generation failed for ${channel.name}:`, err);
+                    console.error(`Outreach generation failed for ${channel.name}:`, err);
                     channel.aiSubjectLine = "";
                     channel.aiFirstLine = "";
                 }
