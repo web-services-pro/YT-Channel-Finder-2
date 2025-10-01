@@ -235,6 +235,71 @@ async function extractContactInfoFromPage(page) {
   return result;
 }
 
+/**
+ * Fetch top-level comments for a given video ID
+ * @param {string} videoId 
+ * @param {string} apiKey 
+ * @param {number} maxComments 
+ */
+async function fetchVideoComments(videoId, apiKey, maxComments = 20) {
+  try {
+    const url = `https://www.googleapis.com/youtube/v3/commentThreads?part=snippet&videoId=${videoId}&maxResults=${maxComments}&key=${apiKey}`;
+    const resp = await fetch(url);
+    const data = await resp.json();
+
+    if (!data.items) {
+      console.warn(`⚠️ No comments found for video: ${videoId}`);
+      return [];
+    }
+
+    return data.items.map(item => 
+      item.snippet.topLevelComment.snippet.textDisplay
+    );
+  } catch (err) {
+    console.error(`❌ Failed to fetch comments for ${videoId}:`, err.message);
+    return [];
+  }
+}
+
+// --- New pipeline: fetch videos + comments for outreach ---
+app.get("/api/channel-data", async (req, res) => {
+  const { channelId } = req.query;
+  if (!channelId) return res.status(400).json({ error: "Missing channelId" });
+  if (YOUTUBE_API_KEYS.length === 0) return res.status(503).json({ error: "No YouTube API keys available" });
+
+  const apiKey = YOUTUBE_API_KEYS[Math.floor(Math.random() * YOUTUBE_API_KEYS.length)];
+
+  try {
+    const videos = await fetchRecentVideos(channelId, apiKey, 5);
+
+    const recentVideos = [];
+    let recentComments = [];
+
+    for (const v of videos) {
+      recentVideos.push({
+        title: v.snippet.title,
+        description: v.snippet.description
+      });
+
+      const comments = await fetchVideoComments(v.id.videoId, apiKey, 10);
+      recentComments.push(...comments);
+    }
+
+    // cap at 30 comments
+    recentComments = recentComments.slice(0, 30);
+
+    res.json({
+      success: true,
+      channelId,
+      recentVideos,
+      recentComments
+    });
+  } catch (err) {
+    console.error("❌ Channel data fetch failed:", err.message);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 // --- Enhanced Scrape About Page ---
 app.get("/api/scrape-about", async (req, res) => {
   const { channelId } = req.query;
@@ -410,23 +475,25 @@ app.get("/api/scrape-about", async (req, res) => {
   }
 });
 
-// --- AI Outreach Generation ---
+// Updated outreach endpoint with comments support
 app.post("/api/outreach", async (req, res) => {
   try {
-    const { channelName, description, recentVideos, ownerName } = req.body;
+    const { channelName, description, recentVideos, recentComments, ownerName, openaiApiKey } = req.body;
 
-    console.log(`🚀 Outreach request for: ${channelName}`);
-    console.log(`Using server-side OpenAI key: ${!!OPENAI_API_KEY}`);
+    console.log(`Outreach request for: ${channelName}`);
+    console.log(`OpenAI key provided: ${!!openaiApiKey}`);
+    console.log(`Comments provided: ${Array.isArray(recentComments) ? recentComments.length : 0}`);
 
     const outreach = await generatePersonalizedOutreach({
       channelName,
       description,
       recentVideos: recentVideos || [],
+      recentComments: recentComments || [], 
       ownerName: ownerName || "",
-      openaiApiKey: OPENAI_API_KEY  // Use server-side key
+      openaiApiKey: openaiApiKey
     });
 
-    console.log(`✅ Outreach result for ${channelName}:`, outreach);
+    console.log(`Outreach result for ${channelName}:`, outreach);
 
     res.json({
       success: true,
