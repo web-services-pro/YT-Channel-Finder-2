@@ -236,6 +236,30 @@ async function extractContactInfoFromPage(page) {
 }
 
 /**
+ * Fetch recent videos for a channel
+ * @param {string} channelId 
+ * @param {string} apiKey 
+ * @param {number} maxResults 
+ */
+async function fetchRecentVideos(channelId, apiKey, maxResults = 5) {
+  try {
+    const url = `https://www.googleapis.com/youtube/v3/search?part=snippet&channelId=${channelId}&type=video&order=date&maxResults=${maxResults}&key=${apiKey}`;
+    const resp = await fetch(url);
+    const data = await resp.json();
+
+    if (!data.items) {
+      console.warn(`No videos found for channel: ${channelId}`);
+      return [];
+    }
+
+    return data.items;
+  } catch (err) {
+    console.error(`Failed to fetch videos for ${channelId}:`, err.message);
+    return [];
+  }
+}
+
+/**
  * Fetch top-level comments for a given video ID
  * @param {string} videoId 
  * @param {string} apiKey 
@@ -478,10 +502,10 @@ app.get("/api/scrape-about", async (req, res) => {
 // Updated outreach endpoint with comments support
 app.post("/api/outreach", async (req, res) => {
   try {
-    const { channelName, description, recentVideos, recentComments, ownerName, openaiApiKey } = req.body;
+    const { channelName, description, recentVideos, recentComments, ownerName } = req.body;
 
-    console.log(`Outreach request for: ${channelName}`);
-    console.log(`OpenAI key provided: ${!!openaiApiKey}`);
+    console.log(`🚀 Outreach request for: ${channelName}`);
+    console.log(`Using server-side OpenAI key: ${!!OPENAI_API_KEY}`);
     console.log(`Comments provided: ${Array.isArray(recentComments) ? recentComments.length : 0}`);
 
     const outreach = await generatePersonalizedOutreach({
@@ -490,10 +514,10 @@ app.post("/api/outreach", async (req, res) => {
       recentVideos: recentVideos || [],
       recentComments: recentComments || [], 
       ownerName: ownerName || "",
-      openaiApiKey: openaiApiKey
+      openaiApiKey: OPENAI_API_KEY  // Use server-side key
     });
 
-    console.log(`Outreach result for ${channelName}:`, outreach);
+    console.log(`✅ Outreach result for ${channelName}:`, outreach);
 
     res.json({
       success: true,
