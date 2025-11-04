@@ -326,6 +326,25 @@
             margin-top: 3px;
         }
 
+        .email-badge {
+            display: inline-block;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            margin-top: 4px;
+        }
+
+        .email-from-scraper {
+            background: #d4edda;
+            color: #155724;
+        }
+
+        .email-from-description {
+            background: #cce5ff;
+            color: #004085;
+        }
+
         @media (max-width: 768px) {
             .header h1 { font-size: 2rem; }
             .form-grid { grid-template-columns: 1fr; }
@@ -407,7 +426,7 @@
                             <th>Engagement Rate</th>
                             <th>Audience Match</th>
                             <th>Recent Video</th>
-                            <th>Contact</th>
+                            <th>Contact Email</th>
                             <th>Social Media</th>
                             <th>Monetization</th>
                             <th>Other Links</th>
@@ -954,37 +973,40 @@
             }
             
             async performSearch(formData) {
-                // Step 1: Generate search queries (10%)
+                // Step 1: Generate search queries (5%)
                 this.updateProgress(5, 'Generating search queries...');
-                const queries = await this.generateSearchQueries(formData.niche, formData.openaiApiKey);
+                const queries = await this.generateSearchQueries(formData.niche);
                 
-                // Step 2: Discover channels (10-50%)
+                // Step 2: Discover channels (10-40%)
                 this.updateProgress(10, 'Discovering channels...');
-                const rawChannels = await this.discoverChannels(queries, formData.youtubeApiKey, formData.minSubscribers, formData.maxSubscribers);
+                const rawChannels = await this.discoverChannels(queries, formData.minSubscribers, formData.maxSubscribers);
                 
-                // Step 3: Analyze engagement (50-70%)
-                this.updateProgress(50, 'Analyzing engagement rates...');
-                const engagedChannels = await this.analyzeEngagement(rawChannels, formData.youtubeApiKey, formData.minEngagement);
+                // Step 3: Analyze engagement (40-55%)
+                this.updateProgress(40, 'Analyzing engagement rates...');
+                const engagedChannels = await this.analyzeEngagement(rawChannels, formData.minEngagement);
                 
-                // Step 4: Collect contact info (70-80%)
-                this.updateProgress(70, 'Collecting contact information...');
-                const contactChannels = await this.collectContactInfo(engagedChannels, formData.youtubeApiKey);
+                // Step 4: Collect contact info (55-65%)
+                this.updateProgress(55, 'Collecting contact information...');
+                const contactChannels = await this.collectContactInfo(engagedChannels);
                 
-                // Step 5: Get recent videos (80-90%)
-                this.updateProgress(80, 'Fetching recent videos...');
-                const channelsWithVideos = await this.getRecentVideos(contactChannels, formData.youtubeApiKey);
+                // Step 5: Get recent videos (65-75%)
+                this.updateProgress(65, 'Fetching recent videos...');
+                const channelsWithVideos = await this.getRecentVideos(contactChannels);
                 
-                // Step 6: Analyze audience match (90-95%)
-                this.updateProgress(90, 'Analyzing audience match...');
-                const matchedChannels = await this.analyzeAudienceMatch(channelsWithVideos, formData.targetAudience, formData.openaiApiKey);
+                // Step 6: **NEW** Enrich emails with ScraperCity (75-85%)
+                this.updateProgress(75, 'Enriching emails via ScraperCity API...');
+                await this.enrichEmailsWithScraperCity(channelsWithVideos, formData.niche);
                 
-                // Step 7: Finalize results (95-100%)
+                // Step 7: Analyze audience match (85-95%)
+                this.updateProgress(85, 'Analyzing audience match...');
+                const matchedChannels = await this.analyzeAudienceMatch(channelsWithVideos, formData.targetAudience);
+                
+                // Step 8: Finalize results (95-100%)
                 this.updateProgress(95, 'Preparing results...');
                 this.foundChannels = matchedChannels.slice(0, formData.channelCount);
                 
                 this.updateProgress(100, 'Search complete!');
                 
-                // Show results
                 setTimeout(() => {
                     this.showResults();
                 }, 500);
@@ -1286,6 +1308,7 @@
                     otherLinks: mergedOtherLinks,
                     monetization: monetization,
                     emailAvailable: mergedEmails.length > 0,
+                    emailSource: mergedEmails.length > 0 ? 'description' : null,
                     hasBusinessInquiry: scrapedData.hasBusinessInquiry || false
                 };
             }
@@ -1507,6 +1530,79 @@
                     ? engagementRates.reduce((a, b) => a + b, 0) / engagementRates.length
                     : 0;
             }
+
+            // **NEW METHOD: ScraperCity Email Enrichment**
+            async enrichEmailsWithScraperCity(channels, niche) {
+                try {
+                    const channelsNeedingEmails = channels.filter(ch => !ch.emailAvailable);
+                    
+                    if (channelsNeedingEmails.length === 0) {
+                        console.log('✅ All channels already have emails, skipping ScraperCity');
+                        return;
+                    }
+
+                    console.log(`📧 ${channelsNeedingEmails.length} channels need emails, calling ScraperCity...`);
+                    this.updateProgress(75, `Requesting email enrichment for ${channelsNeedingEmails.length} channels...`);
+                    
+                    const response = await fetch('/api/scrape-youtube-emails', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            keyword: niche,
+                            maxResults: Math.min(channelsNeedingEmails.length * 2, 200)
+                        })
+                    });
+
+                    if (!response.ok) {
+                        console.warn('⚠️ ScraperCity API failed:', response.status);
+                        const errorText = await response.text();
+                        console.warn('Error details:', errorText);
+                        return;
+                    }
+
+                    this.updateProgress(78, 'Processing ScraperCity results...');
+                    
+                    const data = await response.json();
+                    
+                    if (!data.success || !data.channels || data.channels.length === 0) {
+                        console.log('ℹ️ No email results from ScraperCity');
+                        return;
+                    }
+
+                    console.log(`✅ ScraperCity returned ${data.channels.length} channels with emails`);
+
+                    let enrichedCount = 0;
+                    
+                    for (const scrapedChannel of data.channels) {
+                        const channelId = this.extractChannelIdFromUrl(scrapedChannel.url);
+                        
+                        if (channelId) {
+                            const matchingChannel = channels.find(ch => ch.id === channelId);
+                            
+                            if (matchingChannel && !matchingChannel.emailAvailable && scrapedChannel.email) {
+                                matchingChannel.email = scrapedChannel.email;
+                                matchingChannel.emails = [scrapedChannel.email];
+                                matchingChannel.emailAvailable = true;
+                                matchingChannel.emailSource = 'scrapercity';
+                                enrichedCount++;
+                                console.log(`✅ Enriched ${matchingChannel.name} with email from ScraperCity`);
+                            }
+                        }
+                    }
+
+                    this.updateProgress(83, `Enriched ${enrichedCount} channels with emails`);
+                    console.log(`🎉 Successfully enriched ${enrichedCount} channels with ScraperCity emails`);
+
+                } catch (error) {
+                    console.error('❌ ScraperCity enrichment error:', error);
+                }
+            }
+
+            extractChannelIdFromUrl(url) {
+                if (!url) return null;
+                const match = url.match(/channel\/([^\/\?]+)/);
+                return match ? match[1] : null;
+            }
             
             async analyzeAudienceMatch(channels, targetAudience, openaiApiKey) {
                 const progressStep = 5 / channels.length;
@@ -1628,9 +1724,12 @@
                     // Format contact info
                     let contactHtml = 'N/A';
                     if (channel.email) {
-                        contactHtml = `<a href="mailto:${channel.email}">${this.escapeHtml(channel.email)}</a>`;
-                    } else if (channel.website) {
-                        contactHtml = `<a href="${channel.website}" target="_blank">Website</a>`;
+                        const emailBadgeClass = channel.emailSource === 'scrapercity' ? 'email-from-scraper' : 'email-from-description';
+                        const emailBadgeText = channel.emailSource === 'scrapercity' ? '🔍 ScraperCity' : '📄 Description';
+                        contactHtml = `
+                            <a href="mailto:${channel.email}">${this.escapeHtml(channel.email)}</a>
+                            <br><span class="email-badge ${emailBadgeClass}">${emailBadgeText}</span>
+                        `;
                     }
             
                     row.innerHTML = `
@@ -1663,7 +1762,9 @@
                             ${channel.monetization || 'Unknown'}
                         </td>
                         <td>
-                            ${(channel.otherLinks || []).slice(0, 3).join(' | ')}
+                            ${(channel.otherLinks || []).slice(0, 3).map(link => 
+                                `<a href="${link}" target="_blank" class="social-link">${this.truncateText(link, 30)}</a>`
+                            ).join(' ') || 'None'}
                         </td>
                         <td>
                             ${channel.emailAvailable ? 'Yes' : 'No'}
@@ -1722,6 +1823,7 @@
                     'Recent Video URL',
                     'Recent Video Date',
                     'Contact Email',
+                    'Email Source',
                     'Website',
                     'Instagram',
                     'Twitter',
@@ -1749,6 +1851,7 @@
                         channel.recentVideo ? channel.recentVideo.url : '',
                         channel.recentVideo ? channel.recentVideo.publishedAt : '',
                         channel.email || '',
+                        channel.emailSource || '',
                         channel.website || '',
                         channel.instagram || '',
                         channel.twitter || '',
