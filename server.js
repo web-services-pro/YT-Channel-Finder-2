@@ -78,7 +78,7 @@ app.get("/api/youtube-keys", (req, res) => {
   res.json({ keys: YOUTUBE_API_KEYS });
 });
 
-// Add this NEW endpoint after the /api/youtube-keys endpoint
+// Replace the /api/scrape-youtube-emails endpoint in server.js
 app.post('/api/scrape-youtube-emails', async (req, res) => {
   const { keyword, maxResults } = req.body;
   
@@ -112,13 +112,13 @@ app.post('/api/scrape-youtube-emails', async (req, res) => {
     const runId = scrapeData.runId;
     console.log(`✅ ScraperCity job started with runId: ${runId}`);
     
-    // Poll for completion
+    // Poll for completion with shorter intervals
     let status = 'running';
     let attempts = 0;
-    const maxAttempts = 60; // 5 minutes max (60 attempts * 5 seconds)
+    const maxAttempts = 120; // 2 minutes max (120 attempts * 1 second)
     
     while (status === 'running' && attempts < maxAttempts) {
-      await new Promise(resolve => setTimeout(resolve, 5000)); // Wait 5 seconds
+      await new Promise(resolve => setTimeout(resolve, 1000)); // Wait 1 second instead of 5
       
       const statusResponse = await fetch(
         `https://app.scrapercity.com/api/v1/scrape/status/${runId}`,
@@ -133,10 +133,13 @@ app.post('/api/scrape-youtube-emails', async (req, res) => {
       status = statusData.status;
       attempts++;
       
-      console.log(`⏳ ScraperCity poll attempt ${attempts}/${maxAttempts}: ${status}`);
+      // Only log every 10 attempts to reduce noise
+      if (attempts % 10 === 0) {
+        console.log(`⏳ ScraperCity poll attempt ${attempts}/${maxAttempts}: ${status}`);
+      }
       
       if (status === 'completed') {
-        console.log(`✅ ScraperCity job completed, downloading results...`);
+        console.log(`✅ ScraperCity job completed after ${attempts} seconds, downloading results...`);
         
         // Download results
         const downloadResponse = await fetch(
@@ -168,10 +171,10 @@ app.post('/api/scrape-youtube-emails', async (req, res) => {
     }
     
     // Timeout
-    console.warn(`⏰ ScraperCity job timed out after ${maxAttempts * 5} seconds`);
+    console.warn(`⏰ ScraperCity job timed out after ${attempts} seconds`);
     return res.status(408).json({ 
       success: false,
-      error: 'Scrape timeout - took longer than 5 minutes' 
+      error: 'Scrape timeout - took longer than 2 minutes' 
     });
     
   } catch (error) {
