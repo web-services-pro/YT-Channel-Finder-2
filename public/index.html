@@ -973,45 +973,85 @@
             }
             
             async performSearch(formData) {
-                // Step 1: Generate search queries (5%)
-                this.updateProgress(5, 'Generating search queries...');
-                const queries = await this.generateSearchQueries(formData.niche);
-                
-                // Step 2: Discover channels (10-40%)
-                this.updateProgress(10, 'Discovering channels...');
-                const rawChannels = await this.discoverChannels(queries, formData.minSubscribers, formData.maxSubscribers);
-                
-                // Step 3: Analyze engagement (40-55%)
-                this.updateProgress(40, 'Analyzing engagement rates...');
-                const engagedChannels = await this.analyzeEngagement(rawChannels, formData.minEngagement);
-                
-                // Step 4: Collect contact info (55-65%)
-                this.updateProgress(55, 'Collecting contact information...');
-                const contactChannels = await this.collectContactInfo(engagedChannels);
-                
-                // Step 5: Get recent videos (65-75%)
-                this.updateProgress(65, 'Fetching recent videos...');
-                const channelsWithVideos = await this.getRecentVideos(contactChannels);
-                
-                // Step 6: **NEW** Enrich emails with ScraperCity (75-85%)
-                this.updateProgress(75, 'Enriching emails via ScraperCity API...');
-                await this.enrichEmailsWithScraperCity(channelsWithVideos, formData.niche);
-                
-                // Step 7: Analyze audience match (85-95%)
-                this.updateProgress(85, 'Analyzing audience match...');
-                const matchedChannels = await this.analyzeAudienceMatch(channelsWithVideos, formData.targetAudience);
-                
-                // Step 8: Finalize results (95-100%)
-                this.updateProgress(95, 'Preparing results...');
-                this.foundChannels = matchedChannels.slice(0, formData.channelCount);
-                
-                this.updateProgress(100, 'Search complete!');
-                
-                setTimeout(() => {
-                    this.showResults();
-                }, 500);
+                try {
+                    // Step 1: Generate search queries (5%)
+                    this.updateProgress(5, 'Generating search queries...');
+                    const queries = await this.generateSearchQueries(formData.niche);
+        
+                    // Step 2: Discover channels (10-40%)
+                    this.updateProgress(10, 'Discovering channels...');
+                    const rawChannels = await this.discoverChannels(queries, formData.minSubscribers, formData.maxSubscribers);
+        
+                    console.log(`✅ Discovered ${rawChannels.length} channels`);
+        
+                    if (rawChannels.length === 0) {
+                        throw new Error('No channels found matching your criteria. Try broadening your search parameters.');
+                    }
+        
+                    // Step 3: Analyze engagement (40-55%)
+                    this.updateProgress(40, 'Analyzing engagement rates...');
+                    const engagedChannels = await this.analyzeEngagement(rawChannels, formData.minEngagement);
+        
+                    console.log(`✅ ${engagedChannels.length} channels passed engagement filter`);
+        
+                    if (engagedChannels.length === 0) {
+                        throw new Error('No channels met the minimum engagement rate. Try lowering the engagement threshold.');
+                    }
+        
+                    // Step 4: Collect contact info (55-65%)
+                    this.updateProgress(55, 'Collecting contact information...');
+                    const contactChannels = await this.collectContactInfo(engagedChannels);
+        
+                    console.log(`✅ Collected contact info for ${contactChannels.length} channels`);
+        
+                    // Step 5: Get recent videos (65-75%)
+                    this.updateProgress(65, 'Fetching recent videos...');
+                    const channelsWithVideos = await this.getRecentVideos(contactChannels);
+        
+                    console.log(`✅ Fetched videos for ${channelsWithVideos.length} channels`);
+        
+                    // Step 6: Analyze audience match (75-85%)
+                    this.updateProgress(75, 'Analyzing audience match...');
+                    const matchedChannels = await this.analyzeAudienceMatch(channelsWithVideos, formData.targetAudience);
+        
+                    console.log(`✅ Analyzed audience match for ${matchedChannels.length} channels`);
+        
+                    // Step 7: **MOVED** Enrich emails with ScraperCity (85-95%)
+                    // Only enrich if we actually have channels
+                    if (matchedChannels.length > 0) {
+                        try {
+                            this.updateProgress(85, 'Enriching emails via ScraperCity API...');
+                            await this.enrichEmailsWithScraperCity(matchedChannels, formData.niche);
+                            console.log(`✅ Email enrichment completed`);
+                        } catch (scraperError) {
+                            // Don't fail the entire search if ScraperCity fails
+                            console.warn('⚠️ ScraperCity enrichment failed, continuing without it:', scraperError.message);
+                        }
+                    }
+        
+                    // Step 8: Finalize results (95-100%)
+                    this.updateProgress(95, 'Preparing results...');
+                    this.foundChannels = matchedChannels.slice(0, formData.channelCount);
+        
+                    console.log(`🎉 Final results: ${this.foundChannels.length} channels`);
+        
+                    if (this.foundChannels.length === 0) {
+                        throw new Error('No channels found after all filtering. Try adjusting your search criteria.');
+                    }
+        
+                    this.updateProgress(100, 'Search complete!');
+        
+                    setTimeout(() => {
+                        this.showResults();
+                    }, 500);
+        
+                } catch (error) {
+                    console.error('❌ Search failed:', error);
+                    this.updateProgress(0, 'Search failed');
+                    throw error; // Re-throw to be caught by the outer try-catch
+                }
             }
-
+            
             async generateSearchQueries(niche, openaiApiKey) {
                 if (openaiApiKey) {
                     try {
