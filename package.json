@@ -10,7 +10,7 @@
   "scripts": {
     "start": "node server.js",
     "dev": "node server.js",
-    "build": "echo 'Installing Chromium dependencies' && apt-get update || echo 'apt-get not available'"
+    "build": "node -e \"console.log('Installing Puppeteer...')\" && npx puppeteer browsers install chrome"
   },
   "dependencies": {
     "express": "^4.19.2",
