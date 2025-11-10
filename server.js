@@ -5,7 +5,7 @@ import path from "path";
 import { fileURLToPath } from "url";
 import { generatePersonalizedOutreach } from "./api/generatePersonalizedOutreach.js";
 
-// Dynamic imports for puppeteer to handle cloud deployment issues
+// Dynamic imports for puppeteer
 let puppeteer;
 let StealthPlugin;
 
