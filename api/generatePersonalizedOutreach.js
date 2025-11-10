@@ -96,7 +96,6 @@ ${commentText || "No relevant comments available"}
 
     const response = await openai.chat.completions.create({
       model: "gpt-5-mini",
-      temperature: 0.7,
       max_completion_tokens: 300,
       messages: [
         { role: "system", content: systemPrompt },
