@@ -1153,7 +1153,7 @@
                 const apiKey = this.getNextApiKey();
                 console.log(`   Using API key: ${apiKey.substring(0, 10)}...`);
     
-                const searchUrl = `https://www.googleapis.com/youtube/v3/search?part=snippet&type=channel&q=${encodeURIComponent(query)}&maxResults=25&key=${apiKey}`;
+                const searchUrl = `https://www.googleapis.com/youtube/v3/search?part=snippet&type=channel&q=${encodeURIComponent(query)}&maxResults=50&key=${apiKey}`;
     
                 const response = await fetch(searchUrl);
                 if (!response.ok) {
