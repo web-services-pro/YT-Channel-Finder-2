@@ -978,11 +978,14 @@
                     this.updateProgress(5, 'Generating search queries...');
                     const queries = await this.generateSearchQueries(formData.niche);
         
+                    console.log(`📝 Generated ${queries.length} search queries:`, queries);
+        
                     // Step 2: Discover channels (10-40%)
                     this.updateProgress(10, 'Discovering channels...');
                     const rawChannels = await this.discoverChannels(queries, formData.minSubscribers, formData.maxSubscribers);
         
-                    console.log(`✅ Discovered ${rawChannels.length} channels`);
+                    console.log(`✅ Discovered ${rawChannels.length} raw channels`);
+                    console.log('Sample channels:', rawChannels.slice(0, 3).map(c => ({name: c.name, subs: c.subscribers})));
         
                     if (rawChannels.length === 0) {
                         throw new Error('No channels found matching your criteria. Try broadening your search parameters.');
@@ -1051,7 +1054,7 @@
                     throw error; // Re-throw to be caught by the outer try-catch
                 }
             }
-            
+                        
             async generateSearchQueries(niche, openaiApiKey) {
                 if (openaiApiKey) {
                     try {
@@ -1098,134 +1101,176 @@
                 ];
             }
 
-            async discoverChannels(queries, apiKey, minSubs, maxSubs) {
+            // Replace these methods in your YouTubeChannelFinder class
+            async discoverChannels(queries, minSubs, maxSubs) {
                 const allChannels = new Map();
                 const progressStep = 40 / queries.length;
-                
+    
                 for (let i = 0; i < queries.length; i++) {
                     const query = queries[i];
                     this.updateProgress(10 + (i * progressStep), `Searching for "${query}"...`);
-                    
+        
                     try {
-                        const channels = await this.searchYouTubeChannels(query, this.getNextApiKey());
-                        
+                        console.log(`🔍 Searching query ${i + 1}/${queries.length}: "${query}"`);
+                        const channels = await this.searchYouTubeChannels(query);
+                        console.log(`   Found ${channels.length} channels for "${query}"`);
+            
+                        let addedCount = 0;
                         for (const channel of channels) {
                             const subCount = channel.statistics?.subscriberCount ? parseInt(channel.statistics.subscriberCount) : 0;
-                            
+                
+                            console.log(`   - ${channel.snippet.title}: ${subCount} subs (range: ${minSubs}-${maxSubs})`);
+                
                             if (subCount >= minSubs && subCount <= maxSubs) {
-                                allChannels.set(channel.id, {
-                                    id: channel.id,
-                                    name: channel.snippet.title,
-                                    url: `https://youtube.com/channel/${channel.id}`,
-                                    subscribers: subCount,
-                                    description: channel.snippet.description || '',
-                                    customUrl: channel.snippet.customUrl || '',
-                                    publishedAt: channel.snippet.publishedAt
-                                });
+                                if (!allChannels.has(channel.id)) {
+                                    allChannels.set(channel.id, {
+                                        id: channel.id,
+                                        name: channel.snippet.title,
+                                        url: `https://youtube.com/channel/${channel.id}`,
+                                        subscribers: subCount,
+                                        description: channel.snippet.description || '',
+                                        customUrl: channel.snippet.customUrl || '',
+                                        publishedAt: channel.snippet.publishedAt
+                                    });
+                                    addedCount++;
+                                }
                             }
                         }
-                        
+                        console.log(`   ✅ Added ${addedCount} new channels from this query`);
+            
                         await this.delay(100); // Rate limiting
                     } catch (error) {
-                        console.warn(`Failed to search for "${query}":`, error.message);
+                        console.error(`❌ Failed to search for "${query}":`, error.message);
+                        // Continue with next query instead of failing completely
                     }
                 }
-                
+    
+                console.log(`📊 Total unique channels found: ${allChannels.size}`);
                 return Array.from(allChannels.values());
             }
 
-            async searchYouTubeChannels(query, apiKey) {
-                const searchUrl = `https://www.googleapis.com/youtube/v3/search?part=snippet&type=channel&q=${encodeURIComponent(query)}&maxResults=25&key=${this.getNextApiKey()}`;
-                
+            async searchYouTubeChannels(query) {
+                const apiKey = this.getNextApiKey();
+                console.log(`   Using API key: ${apiKey.substring(0, 10)}...`);
+    
+                const searchUrl = `https://www.googleapis.com/youtube/v3/search?part=snippet&type=channel&q=${encodeURIComponent(query)}&maxResults=25&key=${apiKey}`;
+    
                 const response = await fetch(searchUrl);
                 if (!response.ok) {
-                    throw new Error(`YouTube API error: ${response.status}`);
+                    const errorText = await response.text();
+                    console.error(`   YouTube Search API error:`, errorText);
+                    throw new Error(`YouTube API error: ${response.status} - ${errorText}`);
                 }
-                
+    
                 const data = await response.json();
-                const channelIds = data.items.map(item => item.id.channelId).join(',');
-                
-                if (!channelIds) return [];
-                
-                // Get detailed channel info
-                const channelsUrl = `https://www.googleapis.com/youtube/v3/channels?part=snippet,statistics&id=${channelIds}&key=${this.getNextApiKey()}`;
-                const channelsResponse = await fetch(channelsUrl);
-                
-                if (!channelsResponse.ok) {
-                    throw new Error(`YouTube API error: ${channelsResponse.status}`);
+    
+                if (!data.items || data.items.length === 0) {
+                    console.log(`   No channels found for query "${query}"`);
+                    return [];
                 }
-                
+    
+                const channelIds = data.items.map(item => item.id.channelId).join(',');
+                console.log(`   Found ${data.items.length} channel IDs, fetching details...`);
+    
+                // Use SAME API key for the details call
+                const channelsUrl = `https://www.googleapis.com/youtube/v3/channels?part=snippet,statistics&id=${channelIds}&key=${apiKey}`;
+                const channelsResponse = await fetch(channelsUrl);
+    
+                if (!channelsResponse.ok) {
+                    const errorText = await channelsResponse.text();
+                    console.error(`   YouTube Channels API error:`, errorText);
+                    throw new Error(`YouTube API error: ${channelsResponse.status} - ${errorText}`);
+                }
+    
                 const channelsData = await channelsResponse.json();
+                console.log(`   Retrieved details for ${channelsData.items?.length || 0} channels`);
+    
                 return channelsData.items || [];
             }
 
-            async analyzeEngagement(channels, apiKey, minEngagement) {
+            async analyzeEngagement(channels, minEngagement) {
                 const validChannels = [];
-                const progressStep = 20 / channels.length;
-                
+                const progressStep = 15 / channels.length;
+    
+                console.log(`📊 Analyzing engagement for ${channels.length} channels (min: ${minEngagement}%)`);
+    
                 for (let i = 0; i < channels.length; i++) {
                     const channel = channels[i];
-                    this.updateProgress(50 + (i * progressStep), `Analyzing ${channel.name}...`);
-                    
+                    this.updateProgress(40 + (i * progressStep), `Analyzing ${channel.name}...`);
+        
                     try {
-                        const engagementRate = await this.calculateEngagementRate(channel.id, this.getNextApiKey());
-                        
+                        const engagementRate = await this.calculateEngagementRate(channel.id);
+                        console.log(`   ${channel.name}: ${engagementRate.toFixed(2)}% engagement`);
+            
                         if (engagementRate >= minEngagement) {
                             channel.engagementRate = engagementRate;
                             validChannels.push(channel);
+                            console.log(`   ✅ Passed engagement filter`);
+                        } else {
+                            console.log(`   ❌ Below minimum engagement (${minEngagement}%)`);
                         }
-                        
+            
                         await this.delay(100); // Rate limiting
                     } catch (error) {
-                        console.warn(`Failed to analyze engagement for ${channel.name}:`, error.message);
+                        console.warn(`   ⚠️ Failed to analyze engagement for ${channel.name}:`, error.message);
+                        // Skip this channel but continue with others
                     }
                 }
-                
+    
+                console.log(`✅ ${validChannels.length}/${channels.length} channels passed engagement filter`);
                 return validChannels;
             }
 
-            async calculateEngagementRate(channelId, apiKey) {
-                const videosUrl = `https://www.googleapis.com/youtube/v3/search?part=snippet&channelId=${channelId}&type=video&order=date&maxResults=10&key=${this.getNextApiKey()}`;
-                
+            async calculateEngagementRate(channelId) {
+                const apiKey = this.getNextApiKey();
+    
+                const videosUrl = `https://www.googleapis.com/youtube/v3/search?part=snippet&channelId=${channelId}&type=video&order=date&maxResults=10&key=${apiKey}`;
+    
                 const response = await fetch(videosUrl);
                 if (!response.ok) {
                     throw new Error(`YouTube API error: ${response.status}`);
                 }
-                
+    
                 const data = await response.json();
-                const videoIds = data.items.map(item => item.id.videoId).join(',');
-                
-                if (!videoIds) return 0;
-                
-                // Get video statistics
-                const statsUrl = `https://www.googleapis.com/youtube/v3/videos?part=statistics&id=${videoIds}&key=${this.getNextApiKey()}`;
+                const videoIds = data.items?.map(item => item.id.videoId).join(',');
+    
+                if (!videoIds) {
+                    console.log(`   No videos found for engagement calculation`);
+                    return 0;
+                }
+    
+                // Use SAME API key for stats
+                const statsUrl = `https://www.googleapis.com/youtube/v3/videos?part=statistics&id=${videoIds}&key=${apiKey}`;
                 const statsResponse = await fetch(statsUrl);
-                
+    
                 if (!statsResponse.ok) {
                     throw new Error(`YouTube API error: ${statsResponse.status}`);
                 }
-                
+    
                 const statsData = await statsResponse.json();
                 const videos = statsData.items || [];
-                
-                if (videos.length === 0) return 0;
-                
+    
+                if (videos.length === 0) {
+                    console.log(`   No video stats available`);
+                    return 0;
+                }
+    
                 let totalEngagement = 0;
                 let validVideos = 0;
-                
+    
                 for (const video of videos) {
                     const stats = video.statistics;
                     const views = parseInt(stats.viewCount) || 0;
                     const likes = parseInt(stats.likeCount) || 0;
                     const comments = parseInt(stats.commentCount) || 0;
-                    
+        
                     if (views > 0) {
                         const engagement = ((likes + comments) / views) * 100;
                         totalEngagement += engagement;
                         validVideos++;
                     }
                 }
-                
+    
                 return validVideos > 0 ? totalEngagement / validVideos : 0;
             }
 
