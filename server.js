@@ -35,8 +35,23 @@ const YOUTUBE_API_KEYS = process.env.YOUTUBE_API_KEY
   ? process.env.YOUTUBE_API_KEY.split(',').map(k => k.trim()).filter(k => k.length > 0)
   : [];
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY || '';
-const APIFY_API_TOKEN = process.env.APIFY_API_TOKEN || '';
-console.log(`✅ Apify API Token loaded: ${!!APIFY_API_TOKEN}`);
+
+const APIFY_API_TOKENS = process.env.APIFY_API_TOKENS 
+  ? process.env.APIFY_API_TOKENS.split(',').map(k => k.trim()).filter(k => k.length > 0)
+  : [];
+
+console.log(`✅ Apify API Tokens loaded: ${APIFY_API_TOKENS.length} tokens`);
+
+// Add rotation counter
+let currentApifyTokenIndex = -1;
+
+// Add rotation function
+function getNextApifyToken() {
+  if (APIFY_API_TOKENS.length === 0) return null;
+  currentApifyTokenIndex = (currentApifyTokenIndex + 1) % APIFY_API_TOKENS.length;
+  return APIFY_API_TOKENS[currentApifyTokenIndex];
+}
+
 console.log(`✅ YouTube API Keys loaded: ${YOUTUBE_API_KEYS.length} keys`);
 console.log(`✅ OpenAI API Key loaded: ${!!OPENAI_API_KEY}`);
 
@@ -71,10 +86,10 @@ app.get("/api/keys-status", (req, res) => {
   });
 });
 
-// Apify availability check
 app.get("/api/apify-status", (req, res) => {
   res.json({
-    apifyAvailable: !!APIFY_API_TOKEN
+    apifyAvailable: APIFY_API_TOKENS.length > 0,
+    apifyTokensCount: APIFY_API_TOKENS.length
   });
 });
 
@@ -563,7 +578,17 @@ app.post("/api/extract-emails-bulk", async (req, res) => {
   try {
     console.log(`🚀 Starting Apify bulk email extraction for ${channelUrls.length} channels...`);
     
-    const client = new ApifyClient({ token: APIFY_API_TOKEN });
+    const token = getNextApifyToken();
+    if (!token) {
+      return res.status(503).json({ 
+        error: "No Apify tokens available",
+        success: false,
+        results: {}
+      });
+    }
+
+    const client = new ApifyClient({ token });
+    console.log(`Using Apify token index: ${currentApifyTokenIndex + 1}/${APIFY_API_TOKENS.length}`);
     
     // Format input for the Actor
     const input = {
