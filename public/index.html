@@ -969,51 +969,51 @@
             }
             
             async performSearch(formData) {
-                // Step 1: Generate search queries (10%)
+                // Step 1: Generate search queries (5%)
                 this.updateProgress(5, 'Generating search queries...');
                 const queries = await this.generateSearchQueries(formData.niche, formData.openaiApiKey);
-                
-                // Step 2: Discover channels (10-50%)
+    
+                // Step 2: Discover channels (10-30%)
                 this.updateProgress(10, 'Discovering channels...');
                 const rawChannels = await this.discoverChannels(queries, formData.youtubeApiKey, formData.minSubscribers, formData.maxSubscribers);
-                
-                // Step 3: Analyze engagement (50-70%)
+    
+                // Step 3: Analyze engagement (30-50%)
                 this.updateProgress(30, 'Analyzing engagement rates...');
                 const engagedChannels = await this.analyzeEngagement(rawChannels, formData.youtubeApiKey, formData.minEngagement);
-                
-                // Step 4: Collect contact info (70-80%)
-                this.updateProgress(40, 'Collecting contact information...');
+    
+                // Step 4: Collect contact info (50-60%)
+                this.updateProgress(50, 'Collecting contact information...');
                 const contactChannels = await this.collectContactInfo(engagedChannels, formData.youtubeApiKey);
-                
-                // Step 5: Get recent videos (80-90%)
+    
+                // Step 5: Get recent videos (60-75%)
                 this.updateProgress(60, 'Fetching recent videos...');
                 const channelsWithVideos = await this.getRecentVideos(contactChannels, formData.youtubeApiKey);
-                
-                // Step 6: Analyze audience match (90-95%)
-                this.updateProgress(70, 'Analyzing audience match...');
-                const matchedChannels = await this.analyzeAudienceMatch(channelsWithVideos, formData.targetAudience, formData.openaiApiKey);
-                
-                // Step 7: Bulk email extraction with Apify (75-80%)
-                let channelsWithApifyEmails = contactChannels;
+    
+                // Step 6: Analyze audience match (75-85%)
+                this.updateProgress(75, 'Analyzing audience match...');
+                let matchedChannels = await this.analyzeAudienceMatch(channelsWithVideos, formData.targetAudience, formData.openaiApiKey);
+    
+                // Step 7: Bulk email extraction with Apify (85-95%)
                 if (this.apifyAvailable) {
                     this.updateProgress(85, 'Extracting emails with Apify...');
-                    channelsWithApifyEmails = await this.extractEmailsWithApifyBulk(contactChannels);
+                    // ✅ FIXED: Now operates on matchedChannels and reassigns the result
+                    matchedChannels = await this.extractEmailsWithApifyBulk(matchedChannels);
                 } else {
                     console.warn('Apify not available, skipping bulk email extraction');
                 }
-                
+    
                 // Step 8: Finalize results (95-100%)
                 this.updateProgress(95, 'Preparing results...');
                 this.foundChannels = matchedChannels.slice(0, formData.channelCount);
-                
+    
                 this.updateProgress(100, 'Search complete!');
-                
+    
                 // Show results
                 setTimeout(() => {
                     this.showResults();
                 }, 500);
             }
-
+            
             async generateSearchQueries(niche, openaiApiKey) {
                 if (openaiApiKey) {
                     try {
