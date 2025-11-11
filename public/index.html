@@ -925,6 +925,8 @@
                     const response = await fetch('/api/apify-status');
                     const data = await response.json();
                     this.apifyAvailable = data.apifyAvailable;
+                    this.apifyTokensCount = data.apifyTokensCount || 0;
+                    console.log(`✅ Apify available: ${this.apifyAvailable} (${this.apifyTokensCount} tokens)`);
                     console.log(`✅ Apify available: ${this.apifyAvailable}`);
                 } catch (error) {
                     console.warn('Failed to check Apify status:', error.message);
