@@ -341,7 +341,7 @@
     <div class="container">
         <div class="header">
             <h1>🎯 YouTube Channel Finder</h1>
-            <p>Discover the perfect YouTube channels for your niche with advanced filtering and engagement analysis</p>
+            <p>Discover the perfect YouTube channels for your niche with advanced filtering and engagement analysis and AI Analysis</p>
         </div>
 
         <div class="form-section">
@@ -883,6 +883,9 @@
             init() {
                 // Check API keys availability
                 this.checkApiKeys();
+
+                // NEW: Check Apify availability
+                this.checkApifyStatus();
     
                 // Event listeners
                 document.getElementById('searchForm').addEventListener('submit', (e) => {
@@ -914,6 +917,18 @@
                 } catch (error) {
                     this.showError('Failed to load API keys from server');
                     document.getElementById('searchBtn').disabled = true;
+                }
+            }
+            
+            async checkApifyStatus() {
+                try {
+                    const response = await fetch('/api/apify-status');
+                    const data = await response.json();
+                    this.apifyAvailable = data.apifyAvailable;
+                    console.log(`✅ Apify available: ${this.apifyAvailable}`);
+                } catch (error) {
+                    console.warn('Failed to check Apify status:', error.message);
+                    this.apifyAvailable = false;
                 }
             }
             
@@ -963,22 +978,31 @@
                 const rawChannels = await this.discoverChannels(queries, formData.youtubeApiKey, formData.minSubscribers, formData.maxSubscribers);
                 
                 // Step 3: Analyze engagement (50-70%)
-                this.updateProgress(50, 'Analyzing engagement rates...');
+                this.updateProgress(30, 'Analyzing engagement rates...');
                 const engagedChannels = await this.analyzeEngagement(rawChannels, formData.youtubeApiKey, formData.minEngagement);
                 
                 // Step 4: Collect contact info (70-80%)
-                this.updateProgress(70, 'Collecting contact information...');
+                this.updateProgress(40, 'Collecting contact information...');
                 const contactChannels = await this.collectContactInfo(engagedChannels, formData.youtubeApiKey);
                 
                 // Step 5: Get recent videos (80-90%)
-                this.updateProgress(80, 'Fetching recent videos...');
+                this.updateProgress(60, 'Fetching recent videos...');
                 const channelsWithVideos = await this.getRecentVideos(contactChannels, formData.youtubeApiKey);
                 
                 // Step 6: Analyze audience match (90-95%)
-                this.updateProgress(90, 'Analyzing audience match...');
+                this.updateProgress(70, 'Analyzing audience match...');
                 const matchedChannels = await this.analyzeAudienceMatch(channelsWithVideos, formData.targetAudience, formData.openaiApiKey);
                 
-                // Step 7: Finalize results (95-100%)
+                // Step 7: Bulk email extraction with Apify (75-80%)
+                let channelsWithApifyEmails = contactChannels;
+                if (this.apifyAvailable) {
+                    this.updateProgress(85, 'Extracting emails with Apify...');
+                    channelsWithApifyEmails = await this.extractEmailsWithApifyBulk(contactChannels);
+                } else {
+                    console.warn('Apify not available, skipping bulk email extraction');
+                }
+                
+                // Step 8: Finalize results (95-100%)
                 this.updateProgress(95, 'Preparing results...');
                 this.foundChannels = matchedChannels.slice(0, formData.channelCount);
                 
@@ -1195,6 +1219,72 @@
                 return contactChannels;
             }
 
+            /**
+             * Extract emails in bulk using Apify Actor
+             * @param {Array} channels - Array of channel objects
+             */
+            async extractEmailsWithApifyBulk(channels) {
+                if (!this.apifyAvailable || channels.length === 0) {
+                    return channels;
+                }
+
+                try {
+                    // Prepare channel URLs for Apify
+                    const channelUrls = channels.map(ch => ch.url);
+        
+                    console.log(`📨 Sending ${channelUrls.length} channels to Apify for bulk email extraction...`);
+        
+                    // Call the server endpoint
+                    const response = await fetch('/api/extract-emails-bulk', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ channelUrls })
+                    });
+
+                    if (!response.ok) {
+                        throw new Error(`Apify API error: ${response.status}`);
+                    }
+
+                    const data = await response.json();
+        
+                    if (!data.success) {
+                        console.warn('Apify extraction failed:', data.error);
+                        return channels;
+                    }
+
+                    // Merge Apify results back into channels
+                    const enrichedChannels = channels.map(channel => {
+                        const apifyResult = data.results[channel.url];
+            
+                        if (apifyResult && apifyResult.emails && apifyResult.emails.length > 0) {
+                            console.log(`✅ Apify found ${apifyResult.emails.length} emails for ${channel.name}`);
+                
+                            // Merge Apify emails with existing emails (remove duplicates)
+                            const allEmails = [...new Set([
+                                ...(channel.emails || []),
+                                ...apifyResult.emails
+                            ])];
+                
+                            return {
+                                ...channel,
+                                emails: allEmails,
+                                email: allEmails[0] || '', // Update primary email if found
+                                emailAvailable: allEmails.length > 0,
+                                apifyStatus: apifyResult.status
+                            };
+                        }
+            
+                        return channel;
+                    });
+
+                    return enrichedChannels;
+        
+                } catch (error) {
+                    console.error('❌ Bulk email extraction failed:', error.message);
+                    return channels; // Return original channels if Apify fails
+                }
+            }
+            
             async extractContactInfo(channelId, apiKey) {
                 // Step 1: Get standard channel info
                 const channelUrl = `https://www.googleapis.com/youtube/v3/channels?part=snippet,brandingSettings&id=${channelId}&key=${this.getNextApiKey()}`;
