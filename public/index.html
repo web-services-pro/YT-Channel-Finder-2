@@ -326,25 +326,6 @@
             margin-top: 3px;
         }
 
-        .email-badge {
-            display: inline-block;
-            padding: 4px 8px;
-            border-radius: 4px;
-            font-size: 0.75rem;
-            font-weight: 600;
-            margin-top: 4px;
-        }
-
-        .email-from-scraper {
-            background: #d4edda;
-            color: #155724;
-        }
-
-        .email-from-description {
-            background: #cce5ff;
-            color: #004085;
-        }
-
         @media (max-width: 768px) {
             .header h1 { font-size: 2rem; }
             .form-grid { grid-template-columns: 1fr; }
@@ -426,7 +407,7 @@
                             <th>Engagement Rate</th>
                             <th>Audience Match</th>
                             <th>Recent Video</th>
-                            <th>Contact Email</th>
+                            <th>Contact</th>
                             <th>Social Media</th>
                             <th>Monetization</th>
                             <th>Other Links</th>
@@ -973,88 +954,42 @@
             }
             
             async performSearch(formData) {
-                try {
-                    // Step 1: Generate search queries (5%)
-                    this.updateProgress(5, 'Generating search queries...');
-                    const queries = await this.generateSearchQueries(formData.niche);
-        
-                    console.log(`📝 Generated ${queries.length} search queries:`, queries);
-        
-                    // Step 2: Discover channels (10-40%)
-                    this.updateProgress(10, 'Discovering channels...');
-                    const rawChannels = await this.discoverChannels(queries, formData.minSubscribers, formData.maxSubscribers);
-        
-                    console.log(`✅ Discovered ${rawChannels.length} raw channels`);
-                    console.log('Sample channels:', rawChannels.slice(0, 3).map(c => ({name: c.name, subs: c.subscribers})));
-        
-                    if (rawChannels.length === 0) {
-                        throw new Error('No channels found matching your criteria. Try broadening your search parameters.');
-                    }
-        
-                    // Step 3: Analyze engagement (40-55%)
-                    this.updateProgress(40, 'Analyzing engagement rates...');
-                    const engagedChannels = await this.analyzeEngagement(rawChannels, formData.minEngagement);
-        
-                    console.log(`✅ ${engagedChannels.length} channels passed engagement filter`);
-        
-                    if (engagedChannels.length === 0) {
-                        throw new Error('No channels met the minimum engagement rate. Try lowering the engagement threshold.');
-                    }
-        
-                    // Step 4: Collect contact info (55-65%)
-                    this.updateProgress(55, 'Collecting contact information...');
-                    const contactChannels = await this.collectContactInfo(engagedChannels);
-        
-                    console.log(`✅ Collected contact info for ${contactChannels.length} channels`);
-        
-                    // Step 5: Get recent videos (65-75%)
-                    this.updateProgress(65, 'Fetching recent videos...');
-                    const channelsWithVideos = await this.getRecentVideos(contactChannels);
-        
-                    console.log(`✅ Fetched videos for ${channelsWithVideos.length} channels`);
-        
-                    // Step 6: Analyze audience match (75-85%)
-                    this.updateProgress(75, 'Analyzing audience match...');
-                    const matchedChannels = await this.analyzeAudienceMatch(channelsWithVideos, formData.targetAudience);
-        
-                    console.log(`✅ Analyzed audience match for ${matchedChannels.length} channels`);
-        
-                    // Step 7: **MOVED** Enrich emails with ScraperCity (85-95%)
-                    // Only enrich if we actually have channels
-                    if (matchedChannels.length > 0) {
-                        try {
-                            this.updateProgress(85, 'Enriching emails via ScraperCity API...');
-                            await this.enrichEmailsWithScraperCity(matchedChannels, formData.niche);
-                            console.log(`✅ Email enrichment completed`);
-                        } catch (scraperError) {
-                            // Don't fail the entire search if ScraperCity fails
-                            console.warn('⚠️ ScraperCity enrichment failed, continuing without it:', scraperError.message);
-                        }
-                    }
-        
-                    // Step 8: Finalize results (95-100%)
-                    this.updateProgress(95, 'Preparing results...');
-                    this.foundChannels = matchedChannels.slice(0, formData.channelCount);
-        
-                    console.log(`🎉 Final results: ${this.foundChannels.length} channels`);
-        
-                    if (this.foundChannels.length === 0) {
-                        throw new Error('No channels found after all filtering. Try adjusting your search criteria.');
-                    }
-        
-                    this.updateProgress(100, 'Search complete!');
-        
-                    setTimeout(() => {
-                        this.showResults();
-                    }, 500);
-        
-                } catch (error) {
-                    console.error('❌ Search failed:', error);
-                    this.updateProgress(0, 'Search failed');
-                    throw error; // Re-throw to be caught by the outer try-catch
-                }
+                // Step 1: Generate search queries (10%)
+                this.updateProgress(5, 'Generating search queries...');
+                const queries = await this.generateSearchQueries(formData.niche, formData.openaiApiKey);
+                
+                // Step 2: Discover channels (10-50%)
+                this.updateProgress(10, 'Discovering channels...');
+                const rawChannels = await this.discoverChannels(queries, formData.youtubeApiKey, formData.minSubscribers, formData.maxSubscribers);
+                
+                // Step 3: Analyze engagement (50-70%)
+                this.updateProgress(50, 'Analyzing engagement rates...');
+                const engagedChannels = await this.analyzeEngagement(rawChannels, formData.youtubeApiKey, formData.minEngagement);
+                
+                // Step 4: Collect contact info (70-80%)
+                this.updateProgress(70, 'Collecting contact information...');
+                const contactChannels = await this.collectContactInfo(engagedChannels, formData.youtubeApiKey);
+                
+                // Step 5: Get recent videos (80-90%)
+                this.updateProgress(80, 'Fetching recent videos...');
+                const channelsWithVideos = await this.getRecentVideos(contactChannels, formData.youtubeApiKey);
+                
+                // Step 6: Analyze audience match (90-95%)
+                this.updateProgress(90, 'Analyzing audience match...');
+                const matchedChannels = await this.analyzeAudienceMatch(channelsWithVideos, formData.targetAudience, formData.openaiApiKey);
+                
+                // Step 7: Finalize results (95-100%)
+                this.updateProgress(95, 'Preparing results...');
+                this.foundChannels = matchedChannels.slice(0, formData.channelCount);
+                
+                this.updateProgress(100, 'Search complete!');
+                
+                // Show results
+                setTimeout(() => {
+                    this.showResults();
+                }, 500);
             }
-                        
+
             async generateSearchQueries(niche, openaiApiKey) {
                 if (openaiApiKey) {
                     try {
@@ -1101,176 +1036,134 @@
                 ];
             }
 
-            // Replace these methods in your YouTubeChannelFinder class
-            async discoverChannels(queries, minSubs, maxSubs) {
+            async discoverChannels(queries, apiKey, minSubs, maxSubs) {
                 const allChannels = new Map();
                 const progressStep = 40 / queries.length;
-    
+                
                 for (let i = 0; i < queries.length; i++) {
                     const query = queries[i];
                     this.updateProgress(10 + (i * progressStep), `Searching for "${query}"...`);
-        
+                    
                     try {
-                        console.log(`🔍 Searching query ${i + 1}/${queries.length}: "${query}"`);
-                        const channels = await this.searchYouTubeChannels(query);
-                        console.log(`   Found ${channels.length} channels for "${query}"`);
-            
-                        let addedCount = 0;
+                        const channels = await this.searchYouTubeChannels(query, this.getNextApiKey());
+                        
                         for (const channel of channels) {
                             const subCount = channel.statistics?.subscriberCount ? parseInt(channel.statistics.subscriberCount) : 0;
-                
-                            console.log(`   - ${channel.snippet.title}: ${subCount} subs (range: ${minSubs}-${maxSubs})`);
-                
+                            
                             if (subCount >= minSubs && subCount <= maxSubs) {
-                                if (!allChannels.has(channel.id)) {
-                                    allChannels.set(channel.id, {
-                                        id: channel.id,
-                                        name: channel.snippet.title,
-                                        url: `https://youtube.com/channel/${channel.id}`,
-                                        subscribers: subCount,
-                                        description: channel.snippet.description || '',
-                                        customUrl: channel.snippet.customUrl || '',
-                                        publishedAt: channel.snippet.publishedAt
-                                    });
-                                    addedCount++;
-                                }
+                                allChannels.set(channel.id, {
+                                    id: channel.id,
+                                    name: channel.snippet.title,
+                                    url: `https://youtube.com/channel/${channel.id}`,
+                                    subscribers: subCount,
+                                    description: channel.snippet.description || '',
+                                    customUrl: channel.snippet.customUrl || '',
+                                    publishedAt: channel.snippet.publishedAt
+                                });
                             }
                         }
-                        console.log(`   ✅ Added ${addedCount} new channels from this query`);
-            
+                        
                         await this.delay(100); // Rate limiting
                     } catch (error) {
-                        console.error(`❌ Failed to search for "${query}":`, error.message);
-                        // Continue with next query instead of failing completely
+                        console.warn(`Failed to search for "${query}":`, error.message);
                     }
                 }
-    
-                console.log(`📊 Total unique channels found: ${allChannels.size}`);
+                
                 return Array.from(allChannels.values());
             }
 
-            async searchYouTubeChannels(query) {
-                const apiKey = this.getNextApiKey();
-                console.log(`   Using API key: ${apiKey.substring(0, 10)}...`);
-    
-                const searchUrl = `https://www.googleapis.com/youtube/v3/search?part=snippet&type=channel&q=${encodeURIComponent(query)}&maxResults=50&key=${apiKey}`;
-    
+            async searchYouTubeChannels(query, apiKey) {
+                const searchUrl = `https://www.googleapis.com/youtube/v3/search?part=snippet&type=channel&q=${encodeURIComponent(query)}&maxResults=25&key=${this.getNextApiKey()}`;
+                
                 const response = await fetch(searchUrl);
                 if (!response.ok) {
-                    const errorText = await response.text();
-                    console.error(`   YouTube Search API error:`, errorText);
-                    throw new Error(`YouTube API error: ${response.status} - ${errorText}`);
+                    throw new Error(`YouTube API error: ${response.status}`);
                 }
-    
+                
                 const data = await response.json();
-    
-                if (!data.items || data.items.length === 0) {
-                    console.log(`   No channels found for query "${query}"`);
-                    return [];
-                }
-    
                 const channelIds = data.items.map(item => item.id.channelId).join(',');
-                console.log(`   Found ${data.items.length} channel IDs, fetching details...`);
-    
-                // Use SAME API key for the details call
-                const channelsUrl = `https://www.googleapis.com/youtube/v3/channels?part=snippet,statistics&id=${channelIds}&key=${apiKey}`;
+                
+                if (!channelIds) return [];
+                
+                // Get detailed channel info
+                const channelsUrl = `https://www.googleapis.com/youtube/v3/channels?part=snippet,statistics&id=${channelIds}&key=${this.getNextApiKey()}`;
                 const channelsResponse = await fetch(channelsUrl);
-    
+                
                 if (!channelsResponse.ok) {
-                    const errorText = await channelsResponse.text();
-                    console.error(`   YouTube Channels API error:`, errorText);
-                    throw new Error(`YouTube API error: ${channelsResponse.status} - ${errorText}`);
+                    throw new Error(`YouTube API error: ${channelsResponse.status}`);
                 }
-    
+                
                 const channelsData = await channelsResponse.json();
-                console.log(`   Retrieved details for ${channelsData.items?.length || 0} channels`);
-    
                 return channelsData.items || [];
             }
 
-            async analyzeEngagement(channels, minEngagement) {
+            async analyzeEngagement(channels, apiKey, minEngagement) {
                 const validChannels = [];
-                const progressStep = 15 / channels.length;
-    
-                console.log(`📊 Analyzing engagement for ${channels.length} channels (min: ${minEngagement}%)`);
-    
+                const progressStep = 20 / channels.length;
+                
                 for (let i = 0; i < channels.length; i++) {
                     const channel = channels[i];
-                    this.updateProgress(40 + (i * progressStep), `Analyzing ${channel.name}...`);
-        
+                    this.updateProgress(50 + (i * progressStep), `Analyzing ${channel.name}...`);
+                    
                     try {
-                        const engagementRate = await this.calculateEngagementRate(channel.id);
-                        console.log(`   ${channel.name}: ${engagementRate.toFixed(2)}% engagement`);
-            
+                        const engagementRate = await this.calculateEngagementRate(channel.id, this.getNextApiKey());
+                        
                         if (engagementRate >= minEngagement) {
                             channel.engagementRate = engagementRate;
                             validChannels.push(channel);
-                            console.log(`   ✅ Passed engagement filter`);
-                        } else {
-                            console.log(`   ❌ Below minimum engagement (${minEngagement}%)`);
                         }
-            
+                        
                         await this.delay(100); // Rate limiting
                     } catch (error) {
-                        console.warn(`   ⚠️ Failed to analyze engagement for ${channel.name}:`, error.message);
-                        // Skip this channel but continue with others
+                        console.warn(`Failed to analyze engagement for ${channel.name}:`, error.message);
                     }
                 }
-    
-                console.log(`✅ ${validChannels.length}/${channels.length} channels passed engagement filter`);
+                
                 return validChannels;
             }
 
-            async calculateEngagementRate(channelId) {
-                const apiKey = this.getNextApiKey();
-    
-                const videosUrl = `https://www.googleapis.com/youtube/v3/search?part=snippet&channelId=${channelId}&type=video&order=date&maxResults=10&key=${apiKey}`;
-    
+            async calculateEngagementRate(channelId, apiKey) {
+                const videosUrl = `https://www.googleapis.com/youtube/v3/search?part=snippet&channelId=${channelId}&type=video&order=date&maxResults=10&key=${this.getNextApiKey()}`;
+                
                 const response = await fetch(videosUrl);
                 if (!response.ok) {
                     throw new Error(`YouTube API error: ${response.status}`);
                 }
-    
+                
                 const data = await response.json();
-                const videoIds = data.items?.map(item => item.id.videoId).join(',');
-    
-                if (!videoIds) {
-                    console.log(`   No videos found for engagement calculation`);
-                    return 0;
-                }
-    
-                // Use SAME API key for stats
-                const statsUrl = `https://www.googleapis.com/youtube/v3/videos?part=statistics&id=${videoIds}&key=${apiKey}`;
+                const videoIds = data.items.map(item => item.id.videoId).join(',');
+                
+                if (!videoIds) return 0;
+                
+                // Get video statistics
+                const statsUrl = `https://www.googleapis.com/youtube/v3/videos?part=statistics&id=${videoIds}&key=${this.getNextApiKey()}`;
                 const statsResponse = await fetch(statsUrl);
-    
+                
                 if (!statsResponse.ok) {
                     throw new Error(`YouTube API error: ${statsResponse.status}`);
                 }
-    
+                
                 const statsData = await statsResponse.json();
                 const videos = statsData.items || [];
-    
-                if (videos.length === 0) {
-                    console.log(`   No video stats available`);
-                    return 0;
-                }
-    
+                
+                if (videos.length === 0) return 0;
+                
                 let totalEngagement = 0;
                 let validVideos = 0;
-    
+                
                 for (const video of videos) {
                     const stats = video.statistics;
                     const views = parseInt(stats.viewCount) || 0;
                     const likes = parseInt(stats.likeCount) || 0;
                     const comments = parseInt(stats.commentCount) || 0;
-        
+                    
                     if (views > 0) {
                         const engagement = ((likes + comments) / views) * 100;
                         totalEngagement += engagement;
                         validVideos++;
                     }
                 }
-    
+                
                 return validVideos > 0 ? totalEngagement / validVideos : 0;
             }
 
@@ -1393,7 +1286,6 @@
                     otherLinks: mergedOtherLinks,
                     monetization: monetization,
                     emailAvailable: mergedEmails.length > 0,
-                    emailSource: mergedEmails.length > 0 ? 'description' : null,
                     hasBusinessInquiry: scrapedData.hasBusinessInquiry || false
                 };
             }
@@ -1457,30 +1349,15 @@
                     this.updateProgress(80 + (i * progressStep), `Fetching recent videos for ${channel.name}...`);
 
                     try {
-                        // Fetch videos and comments from new endpoint
-                        const channelDataResp = await fetch(`/api/channel-data?channelId=${channel.id}`);
-            
-                        if (!channelDataResp.ok) {
-                            throw new Error(`Failed to fetch channel data: ${channelDataResp.status}`);
-                        }
-            
-                        const channelData = await channelDataResp.json();
-            
-                        if (!channelData.success) {
-                            throw new Error('Channel data fetch unsuccessful');
-                        }
-
-                        // Now fetch full video details for engagement rate calculation
+                        // Get last 5 videos
                         const videosUrl = `https://www.googleapis.com/youtube/v3/search?part=snippet&channelId=${channel.id}&type=video&order=date&maxResults=5&key=${this.getNextApiKey()}`;
                         const searchResp = await fetch(videosUrl);
                         if (!searchResp.ok) throw new Error(`YouTube API error: ${searchResp.status}`);
 
                         const searchData = await searchResp.json();
                         const videoItems = searchData.items || [];
-            
                         if (videoItems.length === 0) {
                             channel.recentVideos = [];
-                            channel.recentComments = [];
                             channel.recentVideo = null;
                             continue;
                         }
@@ -1505,11 +1382,6 @@
                             stats: v.statistics || {}
                         }));
 
-                        // Store comments for outreach generation
-                        channel.recentComments = channelData.recentComments || [];
-            
-                        console.log(`Fetched ${channel.recentComments.length} comments for ${channel.name}`);
-
                         // Pick most recent video for display
                         channel.recentVideo = channel.recentVideos[0];
 
@@ -1531,7 +1403,7 @@
                             channel.patreon = channel.patreon || videoSocials.patreon || '';
                         }
 
-                        // Generate AI outreach (now with comments)
+                        // Generate AI outreach
                         await this.generateOutreachForChannel(channel);
 
                         // Calculate engagement rate
@@ -1539,19 +1411,18 @@
 
                         await this.delay(100); // rate limiting
                     } catch (error) {
-                        console.warn(`Failed to fetch data for ${channel.name}:`, error.message);
+                        console.warn(`Failed to fetch recent videos for ${channel.name}:`, error.message);
                         channel.recentVideos = [];
-                        channel.recentComments = [];
                         channel.recentVideo = null;
                     }
                 }
 
                 return channels;
             }
-                        
+            
             async generateOutreachForChannel(channel) {
                 try {
-                    console.log(`Starting outreach generation for ${channel.name}...`);
+                    console.log(`🎯 Starting outreach generation for ${channel.name}...`);
         
                     const outreachResp = await fetch("/api/outreach", {
                         method: "POST",
@@ -1560,32 +1431,30 @@
                             channelName: channel.name,
                             description: channel.description,
                             recentVideos: channel.recentVideos || [],
-                            recentComments: channel.recentComments || [], 
                             ownerName: channel.name
                         })
                     });
 
                     if (!outreachResp.ok) {
                         const errorText = await outreachResp.text();
-                        console.error(`Outreach API error for ${channel.name}:`, errorText);
+                        console.error(`❌ Outreach API error for ${channel.name}:`, errorText);
                         throw new Error(`API returned ${outreachResp.status}: ${errorText}`);
                     }
 
                     const outreachData = await outreachResp.json();
-                    console.log(`Outreach response for ${channel.name}:`, outreachData);
+                    console.log(`✅ Outreach response for ${channel.name}:`, outreachData);
 
                     // Ensure we're setting the correct properties
                     channel.aiSubjectLine = outreachData.aiSubjectLine || outreachData.subjectLine || "";
                     channel.aiFirstLine = outreachData.aiFirstLine || outreachData.firstLine || "";
         
-                    console.log(`Set AI fields for ${channel.name}:`, {
+                    console.log(`✅ Set AI fields for ${channel.name}:`, {
                         aiSubjectLine: channel.aiSubjectLine,
-                        aiFirstLine: channel.aiFirstLine,
-                        commentsUsed: (channel.recentComments || []).length
+                        aiFirstLine: channel.aiFirstLine
                     });
 
                 } catch (err) {
-                    console.error(`Outreach generation failed for ${channel.name}:`, err);
+                    console.error(`❌ Outreach generation failed for ${channel.name}:`, err);
                     channel.aiSubjectLine = "";
                     channel.aiFirstLine = "";
                 }
@@ -1614,79 +1483,6 @@
                 channel.engagementRate = engagementRates.length > 0
                     ? engagementRates.reduce((a, b) => a + b, 0) / engagementRates.length
                     : 0;
-            }
-
-            // **NEW METHOD: ScraperCity Email Enrichment**
-            async enrichEmailsWithScraperCity(channels, niche) {
-                try {
-                    const channelsNeedingEmails = channels.filter(ch => !ch.emailAvailable);
-                    
-                    if (channelsNeedingEmails.length === 0) {
-                        console.log('✅ All channels already have emails, skipping ScraperCity');
-                        return;
-                    }
-
-                    console.log(`📧 ${channelsNeedingEmails.length} channels need emails, calling ScraperCity...`);
-                    this.updateProgress(75, `Requesting email enrichment for ${channelsNeedingEmails.length} channels...`);
-                    
-                    const response = await fetch('/api/scrape-youtube-emails', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                            keyword: niche,
-                            maxResults: Math.min(channelsNeedingEmails.length * 2, 200)
-                        })
-                    });
-
-                    if (!response.ok) {
-                        console.warn('⚠️ ScraperCity API failed:', response.status);
-                        const errorText = await response.text();
-                        console.warn('Error details:', errorText);
-                        return;
-                    }
-
-                    this.updateProgress(78, 'Processing ScraperCity results...');
-                    
-                    const data = await response.json();
-                    
-                    if (!data.success || !data.channels || data.channels.length === 0) {
-                        console.log('ℹ️ No email results from ScraperCity');
-                        return;
-                    }
-
-                    console.log(`✅ ScraperCity returned ${data.channels.length} channels with emails`);
-
-                    let enrichedCount = 0;
-                    
-                    for (const scrapedChannel of data.channels) {
-                        const channelId = this.extractChannelIdFromUrl(scrapedChannel.url);
-                        
-                        if (channelId) {
-                            const matchingChannel = channels.find(ch => ch.id === channelId);
-                            
-                            if (matchingChannel && !matchingChannel.emailAvailable && scrapedChannel.email) {
-                                matchingChannel.email = scrapedChannel.email;
-                                matchingChannel.emails = [scrapedChannel.email];
-                                matchingChannel.emailAvailable = true;
-                                matchingChannel.emailSource = 'scrapercity';
-                                enrichedCount++;
-                                console.log(`✅ Enriched ${matchingChannel.name} with email from ScraperCity`);
-                            }
-                        }
-                    }
-
-                    this.updateProgress(83, `Enriched ${enrichedCount} channels with emails`);
-                    console.log(`🎉 Successfully enriched ${enrichedCount} channels with ScraperCity emails`);
-
-                } catch (error) {
-                    console.error('❌ ScraperCity enrichment error:', error);
-                }
-            }
-
-            extractChannelIdFromUrl(url) {
-                if (!url) return null;
-                const match = url.match(/channel\/([^\/\?]+)/);
-                return match ? match[1] : null;
             }
             
             async analyzeAudienceMatch(channels, targetAudience, openaiApiKey) {
@@ -1809,12 +1605,9 @@
                     // Format contact info
                     let contactHtml = 'N/A';
                     if (channel.email) {
-                        const emailBadgeClass = channel.emailSource === 'scrapercity' ? 'email-from-scraper' : 'email-from-description';
-                        const emailBadgeText = channel.emailSource === 'scrapercity' ? '🔍 ScraperCity' : '📄 Description';
-                        contactHtml = `
-                            <a href="mailto:${channel.email}">${this.escapeHtml(channel.email)}</a>
-                            <br><span class="email-badge ${emailBadgeClass}">${emailBadgeText}</span>
-                        `;
+                        contactHtml = `<a href="mailto:${channel.email}">${this.escapeHtml(channel.email)}</a>`;
+                    } else if (channel.website) {
+                        contactHtml = `<a href="${channel.website}" target="_blank">Website</a>`;
                     }
             
                     row.innerHTML = `
@@ -1847,9 +1640,7 @@
                             ${channel.monetization || 'Unknown'}
                         </td>
                         <td>
-                            ${(channel.otherLinks || []).slice(0, 3).map(link => 
-                                `<a href="${link}" target="_blank" class="social-link">${this.truncateText(link, 30)}</a>`
-                            ).join(' ') || 'None'}
+                            ${(channel.otherLinks || []).slice(0, 3).join(' | ')}
                         </td>
                         <td>
                             ${channel.emailAvailable ? 'Yes' : 'No'}
@@ -1908,7 +1699,6 @@
                     'Recent Video URL',
                     'Recent Video Date',
                     'Contact Email',
-                    'Email Source',
                     'Website',
                     'Instagram',
                     'Twitter',
@@ -1936,7 +1726,6 @@
                         channel.recentVideo ? channel.recentVideo.url : '',
                         channel.recentVideo ? channel.recentVideo.publishedAt : '',
                         channel.email || '',
-                        channel.emailSource || '',
                         channel.website || '',
                         channel.instagram || '',
                         channel.twitter || '',
