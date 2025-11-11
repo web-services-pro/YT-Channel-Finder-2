@@ -95,8 +95,9 @@ ${commentText || "No relevant comments available"}
     console.log(`🚀 Generating outreach for ${channelName} with OpenAI...`);
 
     const response = await openai.chat.completions.create({
-      model: "gpt-5-mini",
-      max_completion_tokens: 300,
+      model: "gpt-4o-mini",
+      temperature: 0.7,
+      max_tokens: 300,
       messages: [
         { role: "system", content: systemPrompt },
       ],
