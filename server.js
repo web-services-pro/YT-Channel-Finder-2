@@ -5,7 +5,7 @@ import path from "path";
 import { fileURLToPath } from "url";
 import { generatePersonalizedOutreach } from "./api/generatePersonalizedOutreach.js";
 
-// Dynamic imports for puppeteer
+// Dynamic imports for puppeteer to handle cloud deployment issues
 let puppeteer;
 let StealthPlugin;
 
@@ -34,8 +34,7 @@ const YOUTUBE_API_KEYS = process.env.YOUTUBE_API_KEY
   ? process.env.YOUTUBE_API_KEY.split(',').map(k => k.trim()).filter(k => k.length > 0)
   : [];
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY || '';
-const SCRAPERCITY_API_KEY = process.env.SCRAPERCITY_API_KEY || '';
-console.log(`✅ ScraperCity API Key loaded: ${!!SCRAPERCITY_API_KEY}`);
+
 console.log(`✅ YouTube API Keys loaded: ${YOUTUBE_API_KEYS.length} keys`);
 console.log(`✅ OpenAI API Key loaded: ${!!OPENAI_API_KEY}`);
 
@@ -76,114 +75,6 @@ app.get("/api/youtube-keys", (req, res) => {
     return res.status(503).json({ error: "No YouTube API keys configured" });
   }
   res.json({ keys: YOUTUBE_API_KEYS });
-});
-
-// Replace the /api/scrape-youtube-emails endpoint in server.js
-app.post('/api/scrape-youtube-emails', async (req, res) => {
-  const { keyword, maxResults } = req.body;
-  
-  if (!keyword) {
-    return res.status(400).json({ error: 'Missing keyword parameter' });
-  }
-
-  try {
-    console.log(`🔍 Starting ScraperCity search for: "${keyword}" (max: ${maxResults || 100})`);
-    
-    // Start scrape job
-    const scrapeResponse = await fetch('https://app.scrapercity.com/api/v1/scrape/youtube-email', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${SCRAPERCITY_API_KEY}`,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({ 
-        keyword, 
-        maxResults: maxResults || 100 
-      })
-    });
-    
-    const scrapeData = await scrapeResponse.json();
-    
-    if (!scrapeResponse.ok) {
-      console.error('❌ ScraperCity API error:', scrapeData);
-      return res.status(scrapeResponse.status).json(scrapeData);
-    }
-    
-    const runId = scrapeData.runId;
-    console.log(`✅ ScraperCity job started with runId: ${runId}`);
-    
-    // Poll for completion with shorter intervals
-    let status = 'running';
-    let attempts = 0;
-    const maxAttempts = 120; // 2 minutes max (120 attempts * 1 second)
-    
-    while (status === 'running' && attempts < maxAttempts) {
-      await new Promise(resolve => setTimeout(resolve, 1000)); // Wait 1 second instead of 5
-      
-      const statusResponse = await fetch(
-        `https://app.scrapercity.com/api/v1/scrape/status/${runId}`,
-        {
-          headers: {
-            'Authorization': `Bearer ${SCRAPERCITY_API_KEY}`
-          }
-        }
-      );
-      
-      const statusData = await statusResponse.json();
-      status = statusData.status;
-      attempts++;
-      
-      // Only log every 10 attempts to reduce noise
-      if (attempts % 10 === 0) {
-        console.log(`⏳ ScraperCity poll attempt ${attempts}/${maxAttempts}: ${status}`);
-      }
-      
-      if (status === 'completed') {
-        console.log(`✅ ScraperCity job completed after ${attempts} seconds, downloading results...`);
-        
-        // Download results
-        const downloadResponse = await fetch(
-          `https://app.scrapercity.com/api/downloads/${runId}?format=json`,
-          {
-            headers: {
-              'Authorization': `Bearer ${SCRAPERCITY_API_KEY}`
-            }
-          }
-        );
-        
-        const results = await downloadResponse.json();
-        console.log(`🎉 ScraperCity returned ${results.length} channels with emails`);
-        
-        return res.json({ 
-          success: true, 
-          channels: results,
-          totalFound: results.length
-        });
-      }
-      
-      if (status === 'failed') {
-        console.error(`❌ ScraperCity job failed`);
-        return res.status(500).json({ 
-          success: false,
-          error: 'Scrape job failed' 
-        });
-      }
-    }
-    
-    // Timeout
-    console.warn(`⏰ ScraperCity job timed out after ${attempts} seconds`);
-    return res.status(408).json({ 
-      success: false,
-      error: 'Scrape timeout - took longer than 2 minutes' 
-    });
-    
-  } catch (error) {
-    console.error('❌ ScraperCity error:', error);
-    res.status(500).json({ 
-      success: false,
-      error: error.message 
-    });
-  }
 });
 
 // --- Enhanced scraper helper ---
