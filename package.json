@@ -20,7 +20,8 @@
     "puppeteer-extra": "^3.3.6",
     "puppeteer-extra-plugin-stealth": "^2.11.2",
     "json2csv": "^6.0.0-alpha.2",
-    "openai": "^4.0.0"
+    "openai": "^4.0.0",
+    "apify-client": "^2.9.2"
   },
   "devDependencies": {}
 }
