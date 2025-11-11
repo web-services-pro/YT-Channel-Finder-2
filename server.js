@@ -4,6 +4,7 @@ import bodyParser from "body-parser";
 import path from "path";
 import { fileURLToPath } from "url";
 import { generatePersonalizedOutreach } from "./api/generatePersonalizedOutreach.js";
+import { ApifyClient } from 'apify-client';
 
 // Dynamic imports for puppeteer to handle cloud deployment issues
 let puppeteer;
@@ -34,7 +35,8 @@ const YOUTUBE_API_KEYS = process.env.YOUTUBE_API_KEY
   ? process.env.YOUTUBE_API_KEY.split(',').map(k => k.trim()).filter(k => k.length > 0)
   : [];
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY || '';
-
+const APIFY_API_TOKEN = process.env.APIFY_API_TOKEN || '';
+console.log(`✅ Apify API Token loaded: ${!!APIFY_API_TOKEN}`);
 console.log(`✅ YouTube API Keys loaded: ${YOUTUBE_API_KEYS.length} keys`);
 console.log(`✅ OpenAI API Key loaded: ${!!OPENAI_API_KEY}`);
 
@@ -66,6 +68,13 @@ app.get("/api/keys-status", (req, res) => {
     youtubeKeysAvailable: YOUTUBE_API_KEYS.length > 0,
     youtubeKeysCount: YOUTUBE_API_KEYS.length,
     openaiKeyAvailable: !!OPENAI_API_KEY
+  });
+});
+
+// Apify availability check
+app.get("/api/apify-status", (req, res) => {
+  res.json({
+    apifyAvailable: !!APIFY_API_TOKEN
   });
 });
 
@@ -531,6 +540,64 @@ app.post("/api/outreach", async (req, res) => {
       success: false,
       aiSubjectLine: "",
       aiFirstLine: ""
+    });
+  }
+});
+
+// --- New endpoint for Apify bulk email extraction ---
+app.post("/api/extract-emails-bulk", async (req, res) => {
+  const { channelUrls } = req.body;
+  
+  if (!channelUrls || !Array.isArray(channelUrls) || channelUrls.length === 0) {
+    return res.status(400).json({ error: "No channel URLs provided" });
+  }
+
+  if (!APIFY_API_TOKEN) {
+    return res.status(503).json({ 
+      error: "Apify API token not configured",
+      success: false,
+      results: []
+    });
+  }
+
+  try {
+    console.log(`🚀 Starting Apify bulk email extraction for ${channelUrls.length} channels...`);
+    
+    const client = new ApifyClient({ token: APIFY_API_TOKEN });
+    
+    // Format input for the Actor
+    const input = {
+      urls: channelUrls.map(url => ({ url }))
+    };
+
+    // Run the Actor
+    const run = await client.actor("exporter24/youtube-email-bulk-scraper").call(input);
+    
+    // Fetch results from the dataset
+    const { items } = await client.dataset(run.defaultDatasetId).listItems();
+    
+    console.log(`✅ Apify extraction complete. Found emails for ${items.filter(i => i.email.length > 0).length} channels`);
+
+    // Transform results into a lookup map for easy merging
+    const resultsMap = {};
+    items.forEach(item => {
+      resultsMap[item.url] = {
+        emails: item.email || [],
+        status: item.status
+      };
+    });
+
+    res.json({
+      success: true,
+      results: resultsMap
+    });
+
+  } catch (err) {
+    console.error("❌ Apify extraction failed:", err.message);
+    res.status(500).json({ 
+      error: err.message,
+      success: false,
+      results: {}
     });
   }
 });
