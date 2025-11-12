@@ -567,7 +567,7 @@ app.post("/api/extract-emails-bulk", async (req, res) => {
     return res.status(400).json({ error: "No channel URLs provided" });
   }
 
-  if (!APIFY_API_TOKEN) {
+  if (!APIFY_API_TOKENS) {
     return res.status(503).json({ 
       error: "Apify API token not configured",
       success: false,
