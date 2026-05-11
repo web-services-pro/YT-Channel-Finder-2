@@ -2,12 +2,14 @@ services:
   - type: web
     name: yt-channel-finder
     env: node
-    buildCommand: npm install && npx puppeteer browsers install chrome
+    buildCommand: npm install && npm run build
     startCommand: npm start
     envVars:
       - key: NODE_ENV
         value: production
       - key: PUPPETEER_SKIP_CHROMIUM_DOWNLOAD
-        value: false
-      - key: PUPPETEER_EXECUTABLE_PATH
-        value: /opt/render/.cache/puppeteer/chrome/linux-131.0.6778.87/chrome-linux64/chrome
+        value: "false"
+      # This tells Puppeteer where to install AND look for the browser
+      - key: PUPPETEER_CACHE_DIR
+        value: /opt/render/.cache/puppeteer
+
