@@ -396,27 +396,33 @@ app.get("/api/scrape-about", async (req, res) => {
     let foundChrome = false;
 
     // First, try to scan the puppeteer cache directory for ANY chrome version
-    const puppeteerCachePath = '/opt/render/.cache/puppeteer/chrome';
-    try {
-      if (fs.existsSync(puppeteerCachePath)) {
-        const versions = fs.readdirSync(puppeteerCachePath);
-        console.log(`📁 Found Chrome versions in cache:`, versions);
-    
-        // Sort versions to get the latest
-        const sortedVersions = versions.sort().reverse();
-    
-        for (const version of sortedVersions) {
-          const chromePath = `${puppeteerCachePath}/${version}/chrome-linux64/chrome`;
-          if (fs.existsSync(chromePath)) {
-            launchOptions.executablePath = chromePath;
-            console.log(`✅ Found Chromium at: ${chromePath}`);
-            foundChrome = true;
-            break;
+    const projectCachePath = path.join(process.cwd(), '.cache', 'puppeteer', 'chrome');
+    const renderSystemCachePath = '/opt/render/.cache/puppeteer/chrome';
+    const cachePathsToScan = [projectCachePath, renderSystemCachePath];
+
+    for (const puppeteerCachePath of cachePathsToScan) {
+      try {
+        if (fs.existsSync(puppeteerCachePath)) {
+          const versions = fs.readdirSync(puppeteerCachePath);
+          console.log(`📁 Found Chrome versions in cache (${puppeteerCachePath}):`, versions);
+      
+          // Sort versions to get the latest
+          const sortedVersions = versions.sort().reverse();
+      
+          for (const version of sortedVersions) {
+            const chromePath = path.join(puppeteerCachePath, version, 'chrome-linux64', 'chrome');
+            if (fs.existsSync(chromePath)) {
+              launchOptions.executablePath = chromePath;
+              console.log(`✅ Found Chromium at: ${chromePath}`);
+              foundChrome = true;
+              break;
+            }
           }
         }
+      } catch (err) {
+        console.warn(`Could not scan puppeteer cache at ${puppeteerCachePath}:`, err.message);
       }
-    } catch (err) {
-      console.warn('Could not scan puppeteer cache:', err.message);
+      if (foundChrome) break;
     }
 
     // Fallback to system Chrome if not found in cache
