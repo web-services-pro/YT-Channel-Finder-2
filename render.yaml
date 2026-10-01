@@ -11,5 +11,4 @@ services:
         value: "false"
       # This tells Puppeteer where to install AND look for the browser
       - key: PUPPETEER_CACHE_DIR
-        value: /opt/render/.cache/puppeteer
-
+        value: ./.cache/puppeteer
