@@ -5,6 +5,7 @@ import path from "path";
 import { fileURLToPath } from "url";
 import { generatePersonalizedOutreach } from "./api/generatePersonalizedOutreach.js";
 import { ApifyClient } from 'apify-client';
+import OpenAI from "openai";
 
 // Dynamic imports for puppeteer to handle cloud deployment issues
 let puppeteer;
@@ -562,6 +563,61 @@ app.post("/api/outreach", async (req, res) => {
       aiSubjectLine: "",
       aiFirstLine: ""
     });
+  }
+});
+
+// --- Endpoint to generate AI search queries ---
+app.post("/api/generate-queries", async (req, res) => {
+  try {
+    const { niche, targetAudience } = req.body;
+
+    if (!niche) {
+      return res.status(400).json({ error: "Niche is required" });
+    }
+
+    if (!OPENAI_API_KEY) {
+      console.warn("⚠️ OPENAI_API_KEY not configured, returning empty queries for client fallback");
+      return res.json({ success: false, queries: [] });
+    }
+
+    const openai = new OpenAI({ apiKey: OPENAI_API_KEY });
+
+    const systemPrompt = `You are an expert YouTube SEO specialist and audience researcher.
+Generate 12 to 15 diverse, highly relevant YouTube search queries based on the given niche and target audience.
+
+Rules:
+1. Return ONLY a valid JSON object with a "queries" array of strings, e.g. {"queries": ["query 1", "query 2", ...]}.
+2. Include a mix of broad niche terms, tutorial topics, beginner questions, reviews, tool/software comparisons, and industry terminology relevant to this specific topic.
+3. NEVER add generic unrelated terms or hardcoded suffixes (like 'renovation', 'DIY', 'baking') unless directly relevant to the niche.
+4. Keep each query concise (1 to 4 words).
+
+Respond ONLY with JSON format: {"queries": ["query1", "query2", ...]}`;
+
+    const userPrompt = `Niche: ${niche}\nTarget Audience: ${targetAudience || "General audience"}`;
+
+    const response = await openai.chat.completions.create({
+      model: "gpt-4o-mini",
+      temperature: 0.7,
+      messages: [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: userPrompt }
+      ],
+      response_format: { type: "json_object" }
+    });
+
+    const content = response.choices[0].message.content;
+    const parsed = JSON.parse(content);
+    const queries = Array.isArray(parsed) ? parsed : (parsed.queries || parsed.searchQueries || []);
+
+    console.log(`✅ Generated ${queries.length} AI search queries for niche "${niche}"`);
+
+    res.json({
+      success: true,
+      queries: queries.length > 0 ? queries : [niche]
+    });
+  } catch (err) {
+    console.error("❌ Failed to generate AI queries:", err.message);
+    res.json({ success: false, queries: [] });
   }
 });
 
