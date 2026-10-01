@@ -10,7 +10,7 @@
   "scripts": {
     "start": "node server.js",
     "dev": "node server.js",
-    "build": "rm -rf /opt/render/.cache/puppeteer && npx puppeteer browsers install chrome"
+    "build": "rm -rf ./.cache/puppeteer && npx puppeteer browsers install chrome"
   },
   "dependencies": {
     "express": "^4.19.2",
