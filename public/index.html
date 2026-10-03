@@ -972,16 +972,16 @@
             
             async performSearch(formData) {
                 // Step 1: Generate search queries (5%)
-                this.updateProgress(5, 'Generating search queries...');
-                const queries = await this.generateSearchQueries(formData.niche, formData.openaiApiKey);
+                this.updateProgress(5, 'Generating AI search queries...');
+                const queries = await this.generateSearchQueries(formData.niche, formData.targetAudience);
     
                 // Step 2: Discover channels (10-30%)
                 this.updateProgress(10, 'Discovering channels...');
-                const rawChannels = await this.discoverChannels(queries, formData.youtubeApiKey, formData.minSubscribers, formData.maxSubscribers);
+                const rawChannels = await this.discoverChannels(queries, formData.minSubscribers, formData.maxSubscribers);
     
                 // Step 3: Analyze engagement (30-50%)
                 this.updateProgress(30, 'Analyzing engagement rates...');
-                const engagedChannels = await this.analyzeEngagement(rawChannels, formData.youtubeApiKey, formData.minEngagement);
+                const engagedChannels = await this.analyzeEngagement(rawChannels, formData.minEngagement);
     
                 // Step 4: Collect contact info (50-60%)
                 this.updateProgress(50, 'Collecting contact information...');
@@ -1016,62 +1016,70 @@
                 }, 500);
             }
             
-            async generateSearchQueries(niche, openaiApiKey) {
-                if (openaiApiKey) {
-                    try {
-                        // Simulate OpenAI API call with predefined queries
-                        await this.delay(1000);
-                        return this.generateIntelligentQueries(niche);
-                    } catch (error) {
-                        console.warn('OpenAI API failed, using fallback queries');
+            async generateSearchQueries(niche, targetAudience) {
+                try {
+                    const response = await fetch('/api/generate-queries', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ niche, targetAudience })
+                    });
+                    if (response.ok) {
+                        const data = await response.json();
+                        if (data.success && Array.isArray(data.queries) && data.queries.length > 0) {
+                            console.log('🤖 AI generated queries:', data.queries);
+                            return data.queries;
+                        }
                     }
+                } catch (err) {
+                    console.warn('AI Query Generation API failed, using smart dynamic generator:', err.message);
                 }
-                
-                return this.generateFallbackQueries(niche);
+
+                // Smart Niche-Aware Fallback Generator
+                return this.generateSmartFallbackQueries(niche, targetAudience);
             }
 
-            generateIntelligentQueries(niche) {
+            generateSmartFallbackQueries(niche, targetAudience) {
+                const cleanNiche = niche.trim().toLowerCase();
+                const cleanAudience = targetAudience ? targetAudience.trim().toLowerCase() : '';
+
+                // Extract key words from audience without generic stopwords
+                const stopwords = new Set(['people', 'who', 'want', 'to', 'how', 'learn', 'and', 'for', 'the', 'a', 'an', 'in', 'of', 'with', 'on', 'their', 'best', 'get', 'more']);
+                const audienceWords = cleanAudience
+                    .replace(/[^a-z0-9\s]/g, '')
+                    .split(/\s+/)
+                    .filter(w => w.length > 2 && !stopwords.has(w));
+
                 const baseQueries = [
-                    `${niche} tutorial`,
-                    `${niche} tips`,
-                    `${niche} guide`,
-                    `${niche} review`,
-                    `${niche} beginner`
+                    cleanNiche,
+                    `${cleanNiche} channel`,
+                    `${cleanNiche} tutorial`,
+                    `${cleanNiche} tips`,
+                    `${cleanNiche} guide`,
+                    `${cleanNiche} review`,
+                    `${cleanNiche} explained`,
+                    `${cleanNiche} 101`,
+                    `best ${cleanNiche}`
                 ];
-                
-                // Add niche-specific variations
-                const variations = {
-                    'fitness': ['workout', 'exercise', 'training', 'bodybuilding', 'yoga'],
-                    'cooking': ['recipe', 'chef', 'baking', 'cuisine', 'food'],
-                    'tech': ['technology', 'gadget', 'software', 'programming', 'review'],
-                    'beauty': ['makeup', 'skincare', 'cosmetics', 'style', 'fashion'],
-                    'gaming': ['gameplay', 'review', 'walkthrough', 'streaming', 'esports']
-                };
-                
-                const nicheVariations = variations[niche.toLowerCase()] || [niche];
-                return [...baseQueries, ...nicheVariations.map(v => `${v} channel`)];
+
+                // Dynamically append relevant audience terms
+                audienceWords.slice(0, 4).forEach(word => {
+                    baseQueries.push(`${cleanNiche} ${word}`);
+                    baseQueries.push(`${word} tutorial`);
+                });
+
+                return [...new Set(baseQueries)];
             }
 
-            generateFallbackQueries(niche) {
-                return [
-                    niche,
-                    `${niche} tutorial`,
-                    `${niche} tips`,
-                    `${niche} guide`,
-                    `${niche} channel`
-                ];
-            }
-
-            async discoverChannels(queries, apiKey, minSubs, maxSubs) {
+            async discoverChannels(queries, minSubs, maxSubs) {
                 const allChannels = new Map();
-                const progressStep = 40 / queries.length;
+                const progressStep = 40 / (queries.length || 1);
                 
                 for (let i = 0; i < queries.length; i++) {
                     const query = queries[i];
-                    this.updateProgress(10 + (i * progressStep), `Searching for "${query}"...`);
+                    this.updateProgress(10 + (i * progressStep), `Searching YouTube for "${query}"...`);
                     
                     try {
-                        const channels = await this.searchYouTubeChannels(query, this.getNextApiKey());
+                        const channels = await this.searchYouTubeChannels(query);
                         
                         for (const channel of channels) {
                             const subCount = channel.statistics?.subscriberCount ? parseInt(channel.statistics.subscriberCount) : 0;
@@ -1098,75 +1106,113 @@
                 return Array.from(allChannels.values());
             }
 
-            async searchYouTubeChannels(query, apiKey) {
-                const searchUrl = `https://www.googleapis.com/youtube/v3/search?part=snippet&type=channel&q=${encodeURIComponent(query)}&maxResults=25&key=${this.getNextApiKey()}`;
+            async searchYouTubeChannels(query) {
+                const foundChannelIds = new Set();
                 
-                const response = await fetch(searchUrl);
-                if (!response.ok) {
-                    throw new Error(`YouTube API error: ${response.status}`);
-                }
-                
-                const data = await response.json();
-                const channelIds = data.items.map(item => item.id.channelId).join(',');
-                
-                if (!channelIds) return [];
-                
-                // Get detailed channel info
-                const channelsUrl = `https://www.googleapis.com/youtube/v3/channels?part=snippet,statistics&id=${channelIds}&key=${this.getNextApiKey()}`;
-                const channelsResponse = await fetch(channelsUrl);
-                
-                if (!channelsResponse.ok) {
-                    throw new Error(`YouTube API error: ${channelsResponse.status}`);
-                }
-                
-                const channelsData = await channelsResponse.json();
-                return channelsData.items || [];
-            }
-
-            async analyzeEngagement(channels, apiKey, minEngagement) {
-                const validChannels = [];
-                const progressStep = 20 / channels.length;
-                
-                for (let i = 0; i < channels.length; i++) {
-                    const channel = channels[i];
-                    this.updateProgress(50 + (i * progressStep), `Analyzing ${channel.name}...`);
+                // 1. Fetch Page 1 and Page 2 of Channel Search (maxResults=50)
+                let pageToken = '';
+                for (let page = 0; page < 2; page++) {
+                    const tokenParam = pageToken ? `&pageToken=${pageToken}` : '';
+                    const searchUrl = `https://www.googleapis.com/youtube/v3/search?part=snippet&type=channel&q=${encodeURIComponent(query)}&maxResults=50${tokenParam}&key=${this.getNextApiKey()}`;
                     
                     try {
-                        const engagementRate = await this.calculateEngagementRate(channel.id, this.getNextApiKey());
-                        
-                        if (engagementRate >= minEngagement) {
-                            channel.engagementRate = engagementRate;
-                            validChannels.push(channel);
+                        const response = await fetch(searchUrl);
+                        if (response.ok) {
+                            const data = await response.json();
+                            (data.items || []).forEach(item => {
+                                if (item.id?.channelId) foundChannelIds.add(item.id.channelId);
+                            });
+                            pageToken = data.nextPageToken;
+                            if (!pageToken) break;
+                        } else {
+                            break;
                         }
-                        
-                        await this.delay(100); // Rate limiting
-                    } catch (error) {
-                        console.warn(`Failed to analyze engagement for ${channel.name}:`, error.message);
+                    } catch (e) {
+                        break;
+                    }
+                }
+
+                // 2. Secondary Search: Fetch top recent videos to discover active channels in niche
+                try {
+                    const videoSearchUrl = `https://www.googleapis.com/youtube/v3/search?part=snippet&type=video&q=${encodeURIComponent(query)}&order=date&maxResults=25&key=${this.getNextApiKey()}`;
+                    const videoResponse = await fetch(videoSearchUrl);
+                    if (videoResponse.ok) {
+                        const videoData = await videoResponse.json();
+                        (videoData.items || []).forEach(item => {
+                            if (item.snippet?.channelId) foundChannelIds.add(item.snippet.channelId);
+                        });
+                    }
+                } catch (e) {
+                    console.warn("Video search discovery warning:", e.message);
+                }
+
+                const channelIdsArray = Array.from(foundChannelIds);
+                if (channelIdsArray.length === 0) return [];
+                
+                // Batch fetch channel details (up to 50 per request)
+                const detailedChannels = [];
+                for (let i = 0; i < channelIdsArray.length; i += 50) {
+                    const chunk = channelIdsArray.slice(i, i + 50).join(',');
+                    const channelsUrl = `https://www.googleapis.com/youtube/v3/channels?part=snippet,statistics&id=${chunk}&key=${this.getNextApiKey()}`;
+                    
+                    const channelsResponse = await fetch(channelsUrl);
+                    if (channelsResponse.ok) {
+                        const channelsData = await channelsResponse.json();
+                        detailedChannels.push(...(channelsData.items || []));
                     }
                 }
                 
-                return validChannels;
+                return detailedChannels;
             }
 
-            async calculateEngagementRate(channelId, apiKey) {
+            async analyzeEngagement(channels, minEngagement) {
+                const analyzedChannels = [];
+                const progressStep = 20 / (channels.length || 1);
+                
+                for (let i = 0; i < channels.length; i++) {
+                    const channel = channels[i];
+                    this.updateProgress(30 + (i * progressStep), `Analyzing engagement for ${channel.name}...`);
+                    
+                    try {
+                        const engagementRate = await this.calculateEngagementRate(channel.id);
+                        channel.engagementRate = engagementRate;
+                        analyzedChannels.push(channel);
+                        
+                        await this.delay(50); // Rate limiting
+                    } catch (error) {
+                        console.warn(`Failed to analyze engagement for ${channel.name}:`, error.message);
+                        channel.engagementRate = 0;
+                        analyzedChannels.push(channel);
+                    }
+                }
+
+                // Filter into high engagement vs standard engagement
+                const primaryPool = analyzedChannels.filter(c => c.engagementRate >= minEngagement);
+                const secondaryPool = analyzedChannels.filter(c => c.engagementRate < minEngagement)
+                    .sort((a, b) => b.engagementRate - a.engagementRate);
+
+                // Return high-engagement candidates first, filled with standard candidates if needed
+                return [...primaryPool, ...secondaryPool];
+            }
+
+            async calculateEngagementRate(channelId) {
                 const videosUrl = `https://www.googleapis.com/youtube/v3/search?part=snippet&channelId=${channelId}&type=video&order=date&maxResults=10&key=${this.getNextApiKey()}`;
                 
                 const response = await fetch(videosUrl);
                 if (!response.ok) {
-                    throw new Error(`YouTube API error: ${response.status}`);
+                    return 0;
                 }
                 
                 const data = await response.json();
-                const videoIds = data.items.map(item => item.id.videoId).join(',');
+                const videoIds = (data.items || []).map(item => item.id?.videoId).filter(Boolean).join(',');
                 
                 if (!videoIds) return 0;
                 
-                // Get video statistics
                 const statsUrl = `https://www.googleapis.com/youtube/v3/videos?part=statistics&id=${videoIds}&key=${this.getNextApiKey()}`;
                 const statsResponse = await fetch(statsUrl);
                 
                 if (!statsResponse.ok) {
-                    throw new Error(`YouTube API error: ${statsResponse.status}`);
+                    return 0;
                 }
                 
                 const statsData = await statsResponse.json();
@@ -1178,7 +1224,7 @@
                 let validVideos = 0;
                 
                 for (const video of videos) {
-                    const stats = video.statistics;
+                    const stats = video.statistics || {};
                     const views = parseInt(stats.viewCount) || 0;
                     const likes = parseInt(stats.likeCount) || 0;
                     const comments = parseInt(stats.commentCount) || 0;
