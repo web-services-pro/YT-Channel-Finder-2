@@ -530,22 +530,42 @@ app.get("/api/scrape-about", async (req, res) => {
   }
 });
 
-// Updated outreach endpoint with comments support
+// Updated outreach endpoint with automatic comment mining
 app.post("/api/outreach", async (req, res) => {
   try {
-    const { channelName, description, recentVideos, recentComments, ownerName } = req.body;
+    const { channelName, description, recentVideos, ownerName } = req.body;
+    let comments = Array.isArray(req.body.recentComments) ? req.body.recentComments : [];
 
     console.log(`🚀 Outreach request for: ${channelName}`);
-    console.log(`Using server-side OpenAI key: ${!!OPENAI_API_KEY}`);
-    console.log(`Comments provided: ${Array.isArray(recentComments) ? recentComments.length : 0}`);
+    console.log(`Initial comments provided: ${comments.length}`);
+
+    // If comments are missing, attempt to mine them from the most recent video
+    if (comments.length === 0 && Array.isArray(recentVideos) && recentVideos.length > 0) {
+      const topVideo = recentVideos[0];
+      const videoId = topVideo.id || (topVideo.url ? topVideo.url.split("v=")[1]?.split("&")[0] : null);
+      
+      // Attempt 1: Fetch via YouTube Data API
+      if (videoId && YOUTUBE_API_KEYS.length > 0) {
+        const apiKey = YOUTUBE_API_KEYS[Math.floor(Math.random() * YOUTUBE_API_KEYS.length)];
+        comments = await fetchVideoComments(videoId, apiKey, 15);
+      }
+
+      // Attempt 2: If YouTube API returned 0 (or was blocked/quota exhausted), mine via Apify
+      if (comments.length === 0 && topVideo.url) {
+        console.log(`⛏️ Mining comments via Apify for video: ${topVideo.url}`);
+        comments = await scrapeVideoCommentsWithApify(topVideo.url, 15);
+      }
+    }
+
+    console.log(`💬 Total comments fed into outreach copywriter: ${comments.length}`);
 
     const outreach = await generatePersonalizedOutreach({
       channelName,
       description,
       recentVideos: recentVideos || [],
-      recentComments: recentComments || [], 
+      recentComments: comments,
       ownerName: ownerName || "",
-      openaiApiKey: OPENAI_API_KEY  // Use server-side key
+      openaiApiKey: OPENAI_API_KEY
     });
 
     console.log(`✅ Outreach result for ${channelName}:`, outreach);
@@ -553,7 +573,8 @@ app.post("/api/outreach", async (req, res) => {
     res.json({
       success: true,
       aiSubjectLine: outreach.subjectLine,
-      aiFirstLine: outreach.firstLine
+      aiFirstLine: outreach.firstLine,
+      commentsUsed: comments.length
     });
   } catch (err) {
     console.error("❌ Outreach error:", err.message);
@@ -621,7 +642,31 @@ Respond ONLY with JSON format: {"queries": ["query1", "query2", ...]}`;
   }
 });
 
-// --- New endpoint for Apify bulk email extraction ---
+// --- Helper: Scrape comments for outreach using streamers/youtube-comments-scraper ---
+async function scrapeVideoCommentsWithApify(videoUrl, maxComments = 15) {
+  const token = getNextApifyToken();
+  if (!token) return [];
+
+  try {
+    const client = new ApifyClient({ token });
+    const run = await client.actor("streamers/youtube-comments-scraper").call({
+      startUrls: [{ url: videoUrl }],
+      maxComments: maxComments,
+      sortCommentsBy: "TOP_COMMENTS"
+    }, { timeoutSecs: 45 });
+
+    const { items } = await client.dataset(run.defaultDatasetId).listItems();
+    return items
+      .map(item => item.textDisplay || item.text || item.content || "")
+      .filter(Boolean)
+      .slice(0, maxComments);
+  } catch (err) {
+    console.warn("⚠️ Apify comment mining failed:", err.message);
+    return [];
+  }
+}
+
+// --- Enhanced bulk email extraction using lurkapi (with exporter24 fallback) ---
 app.post("/api/extract-emails-bulk", async (req, res) => {
   const { channelUrls } = req.body;
   
@@ -629,63 +674,146 @@ app.post("/api/extract-emails-bulk", async (req, res) => {
     return res.status(400).json({ error: "No channel URLs provided" });
   }
 
-  if (!APIFY_API_TOKENS) {
-    return res.status(503).json({ 
-      error: "Apify API token not configured",
-      success: false,
-      results: []
+  const token = getNextApifyToken();
+  if (!token) {
+    return res.status(503).json({ error: "No Apify tokens available", success: false, results: {} });
+  }
+
+  const client = new ApifyClient({ token });
+  console.log(`🚀 Starting Apify bulk email extraction for ${channelUrls.length} channels...`);
+
+  try {
+    // Attempt 1: Run lurkapi/youtube-channel-email-scraper (scans About page and external websites)
+    const run = await client.actor("lurkapi/youtube-channel-email-scraper").call({
+      urls: channelUrls,
+      scanLinkedWebsites: true
+    }, { timeoutSecs: 90 });
+
+    const { items } = await client.dataset(run.defaultDatasetId).listItems();
+    const resultsMap = {};
+
+    items.forEach(item => {
+      const channelKey = item.channelUrl || item.url || (item.channelId ? `https://youtube.com/channel/${item.channelId}` : null);
+      const emails = item.emails || (item.email ? [item.email] : []);
+      if (channelKey) {
+        resultsMap[channelKey] = {
+          emails: emails.filter(Boolean),
+          status: item.status || "COMPLETED"
+        };
+      }
     });
+
+    console.log(`✅ LurkAPI extraction finished. Processed ${items.length} records.`);
+    return res.json({ success: true, results: resultsMap });
+
+  } catch (err) {
+    console.warn("⚠️ LurkAPI extraction failed, trying fallback exporter24:", err.message);
+
+    // Fallback: exporter24/youtube-email-bulk-scraper
+    try {
+      const fallbackRun = await client.actor("exporter24/youtube-email-bulk-scraper").call({
+        urls: channelUrls.map(url => ({ url }))
+      });
+      const { items } = await client.dataset(fallbackRun.defaultDatasetId).listItems();
+      const resultsMap = {};
+      items.forEach(item => {
+        resultsMap[item.url] = {
+          emails: item.email || [],
+          status: item.status
+        };
+      });
+      return res.json({ success: true, results: resultsMap });
+    } catch (fallbackErr) {
+      console.error("❌ All Apify bulk extractions failed:", fallbackErr.message);
+      return res.status(500).json({ error: fallbackErr.message, success: false, results: {} });
+    }
+  }
+});
+
+// --- Last-Resort Premium Email Extractor (dataovercoffee/youtube-channel-business-email-scraper) ---
+app.post("/api/extract-email-premium", async (req, res) => {
+  const { channelUrl, channelId } = req.body;
+  const target = channelUrl || channelId;
+
+  if (!target) {
+    return res.status(400).json({ error: "Missing channelUrl or channelId" });
+  }
+
+  const token = getNextApifyToken();
+  if (!token) {
+    return res.status(503).json({ error: "No Apify tokens available", success: false });
   }
 
   try {
-    console.log(`🚀 Starting Apify bulk email extraction for ${channelUrls.length} channels...`);
-    
-    const token = getNextApifyToken();
-    if (!token) {
-      return res.status(503).json({ 
-        error: "No Apify tokens available",
-        success: false,
-        results: {}
-      });
-    }
-
+    console.log(`⚡ Initiating premium reCAPTCHA email unlock for: ${target}`);
     const client = new ApifyClient({ token });
-    console.log(`Using Apify token index: ${currentApifyTokenIndex + 1}/${APIFY_API_TOKENS.length}`);
-    
-    // Format input for the Actor
-    const input = {
-      urls: channelUrls.map(url => ({ url }))
-    };
 
-    // Run the Actor
-    const run = await client.actor("exporter24/youtube-email-bulk-scraper").call(input);
-    
-    // Fetch results from the dataset
+    const run = await client.actor("dataovercoffee/youtube-channel-business-email-scraper").call({
+      channels: [target]
+    }, { timeoutSecs: 120 });
+
     const { items } = await client.dataset(run.defaultDatasetId).listItems();
-    
-    console.log(`✅ Apify extraction complete. Found emails for ${items.filter(i => i.email.length > 0).length} channels`);
+    const result = items[0] || {};
+    const email = result.email || result.business_email || (Array.isArray(result.emails) ? result.emails[0] : "");
 
-    // Transform results into a lookup map for easy merging
-    const resultsMap = {};
-    items.forEach(item => {
-      resultsMap[item.url] = {
-        emails: item.email || [],
-        status: item.status
-      };
+    console.log(`✅ Premium extraction result for ${target}: ${email || "None found"}`);
+    res.json({
+      success: !!email,
+      email: email || "",
+      details: result
     });
+  } catch (err) {
+    console.error("❌ Premium email extraction failed:", err.message);
+    res.status(500).json({ success: false, error: err.message, email: "" });
+  }
+});
 
+// --- Lookalike & Niche Expansion (dataovercoffee/youtube-channel-lookalike-finder) ---
+app.post("/api/channel-lookalikes", async (req, res) => {
+  const { seedChannelUrl, seedChannelId, limit = 10 } = req.body;
+  const seed = seedChannelUrl || seedChannelId;
+
+  if (!seed) {
+    return res.status(400).json({ error: "Missing seedChannelUrl or seedChannelId" });
+  }
+
+  const token = getNextApifyToken();
+  if (!token) {
+    return res.status(503).json({ error: "No Apify tokens available", success: false });
+  }
+
+  try {
+    console.log(`🔍 Finding lookalike channels for seed: ${seed}`);
+    const client = new ApifyClient({ token });
+
+    const run = await client.actor("dataovercoffee/youtube-channel-lookalike-finder").call({
+      seed_channel_ids: [seed],
+      limit: Math.min(limit, 15)
+    }, { timeoutSecs: 180 });
+
+    const { items } = await client.dataset(run.defaultDatasetId).listItems();
+
+    const normalizedChannels = items.map(item => ({
+      id: item.channel_id || item.id || "",
+      name: item.channel_name || item.name || item.title || "Lookalike Channel",
+      url: item.channel_url || (item.channel_id ? `https://youtube.com/channel/${item.channel_id}` : ""),
+      subscribers: parseInt(item.subscribers || item.subscriber_count || 0),
+      description: item.description || item.about || "",
+      email: item.email || (item.emails && item.emails[0]) || "",
+      emailAvailable: !!(item.email || (item.emails && item.emails.length > 0)),
+      engagementRate: parseFloat(item.engagement_rate || item.engagementRate || 2.5),
+      audienceMatch: "High",
+      lookalikeScore: item.lookalike_score || null
+    })).filter(c => c.url);
+
+    console.log(`✅ Lookalike finder discovered ${normalizedChannels.length} similar creators`);
     res.json({
       success: true,
-      results: resultsMap
+      channels: normalizedChannels
     });
-
   } catch (err) {
-    console.error("❌ Apify extraction failed:", err.message);
-    res.status(500).json({ 
-      error: err.message,
-      success: false,
-      results: {}
-    });
+    console.error("❌ Lookalike finder failed:", err.message);
+    res.status(500).json({ success: false, error: err.message, channels: [] });
   }
 });
 
