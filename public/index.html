@@ -1561,38 +1561,35 @@
             async generateOutreachForChannel(channel) {
                 try {
                     console.log(`🎯 Starting outreach generation for ${channel.name}...`);
-        
+
                     const outreachResp = await fetch("/api/outreach", {
                         method: "POST",
                         headers: { "Content-Type": "application/json" },
                         body: JSON.stringify({
                             channelName: channel.name,
                             description: channel.description,
-                            recentVideos: channel.recentVideos || [],
+                            recentVideos: (channel.recentVideos || []).map(v => ({
+                                id: v.id,
+                                title: v.title,
+                                description: v.description,
+                                url: v.url
+                            })),
+                            recentComments: channel.recentComments || [],
                             ownerName: channel.name
                         })
                     });
 
                     if (!outreachResp.ok) {
                         const errorText = await outreachResp.text();
-                        console.error(`❌ Outreach API error for ${channel.name}:`, errorText);
                         throw new Error(`API returned ${outreachResp.status}: ${errorText}`);
                     }
 
                     const outreachData = await outreachResp.json();
-                    console.log(`✅ Outreach response for ${channel.name}:`, outreachData);
-
-                    // Ensure we're setting the correct properties
                     channel.aiSubjectLine = outreachData.aiSubjectLine || outreachData.subjectLine || "";
                     channel.aiFirstLine = outreachData.aiFirstLine || outreachData.firstLine || "";
-        
-                    console.log(`✅ Set AI fields for ${channel.name}:`, {
-                        aiSubjectLine: channel.aiSubjectLine,
-                        aiFirstLine: channel.aiFirstLine
-                    });
 
                 } catch (err) {
-                    console.error(`❌ Outreach generation failed for ${channel.name}:`, err);
+                    console.error(`❌ Outreach generation failed for ${channel.name}:`, err.message);
                     channel.aiSubjectLine = "";
                     channel.aiFirstLine = "";
                 }
@@ -1700,15 +1697,14 @@
                 document.getElementById('progressSection').style.display = 'none';
                 document.getElementById('resultsSection').style.display = 'block';
         
-                // Update results count
                 document.getElementById('resultsCount').textContent = `Found ${this.foundChannels.length} channels`;
         
-                // Populate results table
                 const tbody = document.getElementById('resultsBody');
                 tbody.innerHTML = '';
         
-                this.foundChannels.forEach(channel => {
+                this.foundChannels.forEach((channel, idx) => {
                     const row = document.createElement('tr');
+                    row.id = `channel-row-${idx}`;
             
                     // Format recent video
                     let recentVideoHtml = 'No recent videos';
@@ -1724,7 +1720,7 @@
                         `;
                     }
             
-                    // Build social media links using actual scraped data
+                    // Build social media links
                     const socialLinks = [];
                     if (channel.website) socialLinks.push(`<a href="${channel.website}" target="_blank" class="social-link">Website</a>`);
                     if (channel.instagram) socialLinks.push(`<a href="${channel.instagram}" target="_blank" class="social-link">Instagram</a>`);
@@ -1740,12 +1736,17 @@
                         ? `<div class="social-links">${socialLinks.join('')}</div>`
                         : 'None';
             
-                    // Format contact info
-                    let contactHtml = 'N/A';
+                    // Contact column with on-demand premium email unlock
+                    let contactHtml = '';
                     if (channel.email) {
                         contactHtml = `<a href="mailto:${channel.email}">${this.escapeHtml(channel.email)}</a>`;
-                    } else if (channel.website) {
-                        contactHtml = `<a href="${channel.website}" target="_blank">Website</a>`;
+                    } else {
+                        contactHtml = `
+                            <span style="color: #999; font-size: 0.85rem;">Hidden</span>
+                            <button onclick="window.finderApp.unlockPremiumEmail(${idx})" id="unlock-btn-${idx}" style="margin-top: 5px; display: block; padding: 4px 8px; font-size: 0.75rem; background: #667eea; color: white; border: none; border-radius: 4px; cursor: pointer;">
+                                ⚡ Unlock Email
+                            </button>
+                        `;
                     }
             
                     row.innerHTML = `
@@ -1753,22 +1754,25 @@
                             <a href="${channel.url}" target="_blank" class="channel-name">
                                 ${this.escapeHtml(channel.name)}
                             </a>
+                            <button onclick="window.finderApp.findLookalikes(${idx})" style="margin-top: 4px; display: inline-block; padding: 3px 6px; font-size: 0.7rem; background: #f0f2ff; border: 1px solid #667eea; color: #667eea; border-radius: 4px; cursor: pointer;">
+                                🔍 Lookalikes
+                            </button>
                         </td>
                         <td class="subscriber-count">
                             ${this.formatNumber(channel.subscribers)}
                         </td>
                         <td class="engagement-rate">
-                            ${channel.engagementRate.toFixed(2)}%
+                            ${(channel.engagementRate || 0).toFixed(2)}%
                         </td>
                         <td>
                             <span class="audience-match ${this.getMatchClass(channel.audienceMatch)}">
-                                ${channel.audienceMatch}
+                                ${channel.audienceMatch || 'Medium'}
                             </span>
                         </td>
                         <td>
                             ${recentVideoHtml}
                         </td>
-                        <td>
+                        <td id="contact-cell-${idx}">
                             ${contactHtml}
                         </td>
                         <td>
@@ -1780,7 +1784,7 @@
                         <td>
                             ${(channel.otherLinks || []).slice(0, 3).join(' | ')}
                         </td>
-                        <td>
+                        <td id="email-avail-${idx}">
                             ${channel.emailAvailable ? 'Yes' : 'No'}
                         </td>
                         <td>
@@ -1795,6 +1799,81 @@
                     `;
                     tbody.appendChild(row);
                 });
+            }
+
+            async unlockPremiumEmail(index) {
+                const channel = this.foundChannels[index];
+                if (!channel) return;
+
+                const btn = document.getElementById(`unlock-btn-${index}`);
+                const contactCell = document.getElementById(`contact-cell-${index}`);
+                const emailAvailCell = document.getElementById(`email-avail-${index}`);
+
+                if (btn) {
+                    btn.disabled = true;
+                    btn.textContent = "⏳ Solving...";
+                }
+
+                try {
+                    const resp = await fetch("/api/extract-email-premium", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({
+                            channelUrl: channel.url,
+                            channelId: channel.id
+                        })
+                    });
+
+                    const data = await resp.json();
+                    if (data.success && data.email) {
+                        channel.email = data.email;
+                        channel.emailAvailable = true;
+                        if (contactCell) contactCell.innerHTML = `<a href="mailto:${data.email}">${data.email}</a>`;
+                        if (emailAvailCell) emailAvailCell.textContent = "Yes";
+                    } else {
+                        if (btn) btn.textContent = "❌ Not Found";
+                    }
+                } catch (e) {
+                    console.error("Premium email error:", e);
+                    if (btn) btn.textContent = "⚠️ Error";
+                }
+            }
+
+            async findLookalikes(index) {
+                const channel = this.foundChannels[index];
+                if (!channel) return;
+
+                const currentBtn = event.target;
+                if (currentBtn) currentBtn.textContent = "⏳ Searching...";
+
+                try {
+                    const resp = await fetch("/api/channel-lookalikes", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({
+                            seedChannelUrl: channel.url,
+                            seedChannelId: channel.id,
+                            limit: 5
+                        })
+                    });
+
+                    const data = await resp.json();
+                    if (data.success && data.channels && data.channels.length > 0) {
+                        // Append new channels that aren't already listed
+                        const existingIds = new Set(this.foundChannels.map(c => c.id || c.url));
+                        const newChannels = data.channels.filter(c => !existingIds.has(c.id || c.url));
+                        
+                        this.foundChannels.push(...newChannels);
+                        this.showResults();
+                    } else {
+                        alert("No lookalike channels found for this creator.");
+                        if (currentBtn) currentBtn.textContent = "🔍 Lookalikes";
+                    }
+                } catch (err) {
+                    console.error("Lookalike search error:", err);
+                    alert("Lookalike search failed: " + err.message);
+                    if (currentBtn) currentBtn.textContent = "🔍 Lookalikes";
+                }
             }
             
             truncateText(text, maxLength) {
@@ -1942,9 +2021,9 @@
             }
         }
 
-        // Initialize the application
+        // Initialize the application and expose instance
         document.addEventListener('DOMContentLoaded', () => {
-            new YouTubeChannelFinder();
+            window.finderApp = new YouTubeChannelFinder();
         });
     </script>
 </body>
