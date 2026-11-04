@@ -531,12 +531,13 @@ app.get("/api/scrape-about", async (req, res) => {
 });
 
 // Updated outreach endpoint with automatic comment mining
+// Updated outreach endpoint with automatic comment mining & monetization potential
 app.post("/api/outreach", async (req, res) => {
   try {
-    const { channelName, description, recentVideos, ownerName } = req.body;
+    const { channelName, description, recentVideos, ownerName, currentMonetization, subscribers, engagementRate } = req.body;
     let comments = Array.isArray(req.body.recentComments) ? req.body.recentComments : [];
 
-    console.log(`🚀 Outreach request for: ${channelName}`);
+    console.log(`🚀 Outreach & Monetization request for: ${channelName}`);
     console.log(`Initial comments provided: ${comments.length}`);
 
     // If comments are missing, attempt to mine them from the most recent video
@@ -551,7 +552,7 @@ app.post("/api/outreach", async (req, res) => {
       }
 
       // Attempt 2: If YouTube API returned 0 (or was blocked/quota exhausted), mine via Apify
-      if (comments.length === 0 && topVideo.url) {
+      if (comments.length === 0 && topVideo.url && typeof scrapeVideoCommentsWithApify === 'function') {
         console.log(`⛏️ Mining comments via Apify for video: ${topVideo.url}`);
         comments = await scrapeVideoCommentsWithApify(topVideo.url, 15);
       }
@@ -565,6 +566,9 @@ app.post("/api/outreach", async (req, res) => {
       recentVideos: recentVideos || [],
       recentComments: comments,
       ownerName: ownerName || "",
+      currentMonetization: currentMonetization || "Unknown",
+      subscribers: subscribers || 0,
+      engagementRate: engagementRate || 0,
       openaiApiKey: OPENAI_API_KEY
     });
 
@@ -574,6 +578,7 @@ app.post("/api/outreach", async (req, res) => {
       success: true,
       aiSubjectLine: outreach.subjectLine,
       aiFirstLine: outreach.firstLine,
+      monetizationPotential: outreach.monetizationPotential || "",
       commentsUsed: comments.length
     });
   } catch (err) {
@@ -582,7 +587,8 @@ app.post("/api/outreach", async (req, res) => {
       error: err.message,
       success: false,
       aiSubjectLine: "",
-      aiFirstLine: ""
+      aiFirstLine: "",
+      monetizationPotential: ""
     });
   }
 });
