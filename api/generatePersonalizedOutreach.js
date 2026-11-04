@@ -22,6 +22,9 @@ export async function generatePersonalizedOutreach(channelData) {
     recentVideos = [],
     recentComments = [],
     ownerName,
+    currentMonetization = "Unknown",
+    subscribers = 0,
+    engagementRate = 0,
     openaiApiKey
   } = channelData;
 
@@ -32,6 +35,7 @@ export async function generatePersonalizedOutreach(channelData) {
     return {
       subjectLine: "",
       firstLine: "",
+      monetizationPotential: "Digital Products & Paid Community"
     };
   }
 
@@ -56,8 +60,8 @@ export async function generatePersonalizedOutreach(channelData) {
 
   // Construct the outreach prompt
   const systemPrompt = `
-You are an expert cold outreach copywriter.
-Use the following YouTube channel data to generate personalized outreach.
+You are an expert cold outreach copywriter and creator business strategist.
+Use the following YouTube channel data to generate personalized outreach AND identify their single biggest untapped monetization opportunity.
 
 ### Rules:
 1. Subject line: very short (max 6 words), intriguing, and specific to their recent content.
@@ -70,19 +74,27 @@ Use the following YouTube channel data to generate personalized outreach.
        - Or: "noticed a number of contractors in the comments mention struggling with budgeting and customer acquisition..."
 3. If no clear recurring pain points appear in the comments, pivot naturally by asking if their audience struggles with specific problems related to the channel’s theme.
    Example: "Do any of your subscribers say that they need to fix XYZ or solve XYZ problems?"
-4. Be specific and natural. No generic compliments. Avoid sounding like AI.
-5. Always return valid JSON with exactly these keys: "subjectLine" and "firstLine".
+4. Monetization Potential:
+   - Analyze what they currently monetize: "${currentMonetization}".
+   - Compare with their channel scale: ${subscribers} subscribers and ${engagementRate}% engagement rate.
+   - Propose 1 to 2 high-leverage monetization streams they are currently MISSING or could easily scale (e.g., "Paid Skool community & project blueprints", "High-ticket 1-on-1 consulting funnel", "Curated affiliate tool stack & brand deals", "Custom merch & membership tier").
+   - Keep this under 10 words, punchy, and realistic.
+5. Always return valid JSON with exactly these keys: "subjectLine", "firstLine", and "monetizationPotential".
 
 ### Example:
 {
   "subjectLine": "Your Dubai vlog approach",
-  "firstLine": "Hey John, watched some of your recent videos like the one about Dubai vlogs, and noticed that you focus heavily on authentic experiences rather than typical tourist spots..."
+  "firstLine": "Hey John, watched some of your recent videos like the one about Dubai vlogs, and noticed that you focus heavily on authentic experiences rather than typical tourist spots...",
+  "monetizationPotential": "Curated Travel Guides & Paid Community"
 }
 
 ---
 
 Channel Name: ${channelName}
 First Name: ${firstName}
+Subscribers: ${subscribers}
+Engagement Rate: ${engagementRate}%
+Current Monetization: ${currentMonetization}
 About: ${description || "N/A"}
 Recent Video Titles:
 ${videoTitles || "No recent videos available"}
@@ -92,12 +104,12 @@ ${commentText || "No relevant comments available"}
 `;
 
   try {
-    console.log(`🚀 Generating outreach for ${channelName} with OpenAI...`);
+    console.log(`🚀 Generating outreach & monetization analysis for ${channelName} with OpenAI...`);
 
     const response = await openai.chat.completions.create({
       model: "gpt-5.4-mini",
       temperature: 0.7,
-      max_completion_tokens: 300,
+      max_completion_tokens: 350,
       messages: [
         { role: "system", content: systemPrompt },
       ],
@@ -112,11 +124,11 @@ ${commentText || "No relevant comments available"}
     return {
       subjectLine: parsed.subjectLine || "",
       firstLine: parsed.firstLine || "",
+      monetizationPotential: parsed.monetizationPotential || "Digital Products & Consulting"
     };
   } catch (err) {
     console.error("❌ OpenAI outreach generation failed:", err.message);
 
-    // Return fallback content instead of empty strings
     const fallbackSubject = recentVideos.length > 0
       ? `Your ${recentVideos[0].title.split(" ").slice(0, 2).join(" ")} video`
       : `Your ${channelName.split(" ")[0]} content`;
@@ -128,6 +140,7 @@ ${commentText || "No relevant comments available"}
     return {
       subjectLine: fallbackSubject.substring(0, 50),
       firstLine: fallbackFirstLine,
+      monetizationPotential: "Digital Products & Community"
     };
   }
 }
