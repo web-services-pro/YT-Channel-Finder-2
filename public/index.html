@@ -409,7 +409,8 @@
                             <th>Recent Video</th>
                             <th>Contact</th>
                             <th>Social Media</th>
-                            <th>Monetization</th>
+                            <th>Current Monetization</th>
+                            <th>Monetization Potential</th>
                             <th>Other Links</th>
                             <th>Email Available</th>
                             <th>Description</th>
@@ -1428,57 +1429,137 @@
                 };
             }
             
-            analyzeMonetization(description, status, aboutHtml, recentVideos = []) {
-                const monetizationTypes = [];
-                let allText = "";
+            analyzeMonetization(description, status = {}, aboutHtml = "", recentVideos = [], otherLinks = [], websites = []) {
+                const monetizationTypes = new Set();
+                let allText = (description || "") + "\n" + (aboutHtml || "") + "\n";
 
-                // Combine all possible sources of text
-                allText += (description || "") + "\n";
-                allText += (aboutHtml || "") + "\n";
+                // Aggregate all video descriptions & titles
                 for (const v of recentVideos) {
+                    if (v.title) allText += v.title + "\n";
                     if (v.description) allText += v.description + "\n";
                 }
 
+                // Aggregate external links
+                for (const l of otherLinks) allText += String(l) + "\n";
+                for (const w of websites) allText += String(w) + "\n";
+
                 const descLower = allText.toLowerCase();
 
-                // Sponsorships / Affiliates
-                if (descLower.includes("sponsor") || descLower.includes("partnership") || descLower.includes("affiliate")) {
-                    monetizationTypes.push("Sponsorships/Affiliates");
+                // 1. Affiliate Marketing & Networks
+                const affiliateSignals = [
+                    "amzn.to", "amazon.com/shop", "amazon.to", "ltk.app", "liketoknow.it",
+                    "shopstyle", "magiclinks", "rstyle.me", "shareasale", "cj.com", "impact.com",
+                    "clickbank", "affiliate", "use code", "discount code", "coupon code", "promo code", "% off"
+                ];
+                if (affiliateSignals.some(s => descLower.includes(s))) {
+                    monetizationTypes.add("Affiliate Marketing");
                 }
 
-                // Crowdfunding
-                if (descLower.includes("patreon") || descLower.includes("ko-fi") || descLower.includes("buymeacoffee")) {
-                    monetizationTypes.push("Crowdfunding");
+                // 2. Brand Sponsorships & Paid Integrations
+                const sponsorSignals = [
+                    "sponsored by", "special thanks to", "for sponsoring", "partnered with",
+                    "brand ambassador", "partnership", "brand deal", "#ad", "#sponsored"
+                ];
+                if (sponsorSignals.some(s => descLower.includes(s))) {
+                    monetizationTypes.add("Brand Sponsorships");
                 }
 
-                // Merchandise
-                if (descLower.includes("merch") || descLower.includes("shop") || descLower.includes("store")) {
-                    monetizationTypes.push("Merchandise");
+                // 3. Digital Products & Creator Commerce
+                const digitalProdSignals = [
+                    "gumroad.com", "stan.store", "stan.bio", "whop.com", "payhip.com",
+                    "lemonqueezy", "sellfy", "etsy.com", "notion template", "download the template",
+                    "ebook", "digital download", "blueprints", "cad files"
+                ];
+                if (digitalProdSignals.some(s => descLower.includes(s))) {
+                    monetizationTypes.add("Digital Products");
                 }
 
-                // Courses / Coaching
-                if (descLower.includes("course") || descLower.includes("coaching") || descLower.includes("consultation")) {
-                    monetizationTypes.push("Courses/Coaching");
+                // 4. Courses, Coaching & Consulting
+                const courseCoachingSignals = [
+                    "skool.com", "teachable.com", "kajabi.com", "thinkific.com", "podia.com",
+                    "circle.so", "calendly.com", "cal.com", "acuityscheduling", "book a call",
+                    "1-on-1", "coaching", "consulting", "mastermind", "mentorship", "my course", "enroll now"
+                ];
+                if (courseCoachingSignals.some(s => descLower.includes(s))) {
+                    monetizationTypes.add("Courses/Coaching");
                 }
 
-                // Premium Content
-                if (descLower.includes("onlyfans") || descLower.includes("premium content") || descLower.includes("membership")) {
-                    monetizationTypes.push("Premium Content");
+                // 5. Crowdfunding & Fan Memberships
+                const crowdfundingSignals = [
+                    "patreon.com", "buymeacoffee.com", "ko-fi.com", "kofi", "donorbox",
+                    "paypal.me", "tip jar", "support the channel"
+                ];
+                if (crowdfundingSignals.some(s => descLower.includes(s))) {
+                    monetizationTypes.add("Crowdfunding");
                 }
 
-                // Live Streaming / Donations
-                if (descLower.includes("twitch") || descLower.includes("stream") || descLower.includes("donation")) {
-                    monetizationTypes.push("Live Streaming/Donations");
+                // 6. Creator Merchandise
+                const merchSignals = [
+                    "teespring.com", "spring.com", "creator-spring.com", "bonfire.com",
+                    "spreadshirt", "represent.com", "printful", "printify", "shopify.com",
+                    "myshopify.com", "merch", "official merchandise", "apparel"
+                ];
+                if (merchSignals.some(s => descLower.includes(s))) {
+                    monetizationTypes.add("Merchandise");
                 }
 
-                // YouTube Ads
+                // 7. Newsletters & Email Funnels
+                const newsletterSignals = [
+                    "substack.com", "beehiiv.com", "convertkit.com", "kit.com", "newsletter", "join my newsletter"
+                ];
+                if (newsletterSignals.some(s => descLower.includes(s))) {
+                    monetizationTypes.add("Newsletter/List");
+                }
+
+                // 8. YouTube Memberships & AdSense
+                if (descLower.includes("/join") || descLower.includes("join this channel") || descLower.includes("member perks")) {
+                    monetizationTypes.add("YouTube Memberships");
+                }
                 if (status.monetizationDetails || descLower.includes("ad revenue") || descLower.includes("adsense")) {
-                    monetizationTypes.push("YouTube Ads");
+                    monetizationTypes.add("YouTube Ads");
                 }
 
-                return monetizationTypes.length > 0 ? [...new Set(monetizationTypes)].join(", ") : "Unknown";
+                return monetizationTypes.size > 0 ? Array.from(monetizationTypes).join(", ") : "Unknown";
             }
 
+            deriveMonetizationPotential(channel) {
+                const current = (channel.monetization || "").toLowerCase();
+                const subs = channel.subscribers || 0;
+                const eng = channel.engagementRate || 0;
+                const opportunities = [];
+
+                // 1. High Engagement but No Community/Digital Products
+                if (!current.includes("courses/coaching") && !current.includes("digital products")) {
+                    if (subs >= 25000 && eng >= 2.0) {
+                        opportunities.push("Paid Community (Skool) & Digital Guides");
+                    } else if (subs >= 10000) {
+                        opportunities.push("Digital Blueprints / Templates");
+                    }
+                }
+
+                // 2. High Audience Trust but No 1-on-1 Consulting
+                if (!current.includes("courses/coaching") && subs >= 30000 && eng >= 3.0) {
+                    opportunities.push("High-Ticket Consulting / Audits");
+                }
+
+                // 3. Significant Audience but No Direct Brand Deals
+                if (!current.includes("brand sponsorships") && subs >= 50000) {
+                    opportunities.push("Direct Brand Sponsorships");
+                }
+
+                // 4. Missing Affiliate Stack
+                if (!current.includes("affiliate marketing")) {
+                    opportunities.push("Curated Tool / Gear Affiliate Stack");
+                }
+
+                // 5. No Owned Audience Asset
+                if (!current.includes("newsletter/list") && subs >= 20000) {
+                    opportunities.push("Monetized Newsletter & Lead Magnet");
+                }
+
+                return opportunities.length > 0 ? opportunities.slice(0, 2).join(" & ") : "Digital Products & Paid Community";
+            }
+            
             async getRecentVideos(channels) {
                 const progressStep = 10 / channels.length;
 
@@ -1541,11 +1622,24 @@
                             channel.patreon = channel.patreon || videoSocials.patreon || '';
                         }
 
-                        // Generate AI outreach
-                        await this.generateOutreachForChannel(channel);
-
-                        // Calculate engagement rate
+                        // 1. Calculate engagement rate first
                         this.calculateChannelEngagementRate(channel);
+
+                        // 2. Deep re-analysis of monetization using recent video descriptions and all extracted links
+                        channel.monetization = this.analyzeMonetization(
+                            channel.description,
+                            channel.status || {},
+                            '',
+                            channel.recentVideos,
+                            [...(channel.otherLinks || []), ...videoUrls],
+                            channel.website ? [channel.website] : []
+                        );
+
+                        // 3. Derive baseline algorithmic monetization potential
+                        channel.monetizationPotential = this.deriveMonetizationPotential(channel);
+
+                        // 4. Generate AI outreach & personalized monetization angle
+                        await this.generateOutreachForChannel(channel);
 
                         await this.delay(100); // rate limiting
                     } catch (error) {
@@ -1560,7 +1654,7 @@
             
             async generateOutreachForChannel(channel) {
                 try {
-                    console.log(`🎯 Starting outreach generation for ${channel.name}...`);
+                    console.log(`🎯 Starting outreach & monetization generation for ${channel.name}...`);
 
                     const outreachResp = await fetch("/api/outreach", {
                         method: "POST",
@@ -1575,7 +1669,10 @@
                                 url: v.url
                             })),
                             recentComments: channel.recentComments || [],
-                            ownerName: channel.name
+                            ownerName: channel.name,
+                            currentMonetization: channel.monetization || "Unknown",
+                            subscribers: channel.subscribers || 0,
+                            engagementRate: parseFloat((channel.engagementRate || 0).toFixed(2))
                         })
                     });
 
@@ -1587,9 +1684,12 @@
                     const outreachData = await outreachResp.json();
                     channel.aiSubjectLine = outreachData.aiSubjectLine || outreachData.subjectLine || "";
                     channel.aiFirstLine = outreachData.aiFirstLine || outreachData.firstLine || "";
+                    if (outreachData.monetizationPotential) {
+                        channel.monetizationPotential = outreachData.monetizationPotential;
+                    }
 
                 } catch (err) {
-                    console.error(`❌ Outreach generation failed for ${channel.name}:`, err.message);
+                    console.error(`❌ Outreach generation failed for ${channel.name}:`, err);
                     channel.aiSubjectLine = "";
                     channel.aiFirstLine = "";
                 }
@@ -1779,7 +1879,14 @@
                             ${socialLinksHtml}
                         </td>
                         <td>
-                            ${channel.monetization || 'Unknown'}
+                            <span style="font-weight: 500; color: #2d3748; font-size: 0.85rem;">
+                                ${channel.monetization || 'Unknown'}
+                            </span>
+                        </td>
+                        <td>
+                            <span style="display: inline-block; padding: 4px 10px; border-radius: 12px; background: #e8f4fd; color: #1976d2; font-weight: 600; font-size: 0.8rem; border: 1px solid #bbdefb;">
+                                💡 ${channel.monetizationPotential || 'Digital Products & Community'}
+                            </span>
                         </td>
                         <td>
                             ${(channel.otherLinks || []).slice(0, 3).join(' | ')}
@@ -1924,7 +2031,8 @@
                     'LinkedIn',
                     'Patreon',
                     'Email Available',
-                    'Monetization',
+                    'Current Monetization',
+                    'Monetization Potential',
                     'Other Links',
                     'Description',
                     'aiSubjectLine',
@@ -1952,6 +2060,7 @@
                         channel.patreon || '',
                         channel.emailAvailable ? 'Yes' : 'No',
                         `"${(channel.monetization || 'Unknown').replace(/"/g, '""')}"`,
+                        `"${(channel.monetizationPotential || '').replace(/"/g, '""')}"`,
                         `"${(channel.otherLinks && channel.otherLinks.length > 0 
                               ? channel.otherLinks.slice(0, 5).join(' | ') 
                               : ''
@@ -1961,7 +2070,7 @@
                         `"${(channel.aiFirstLine || '').replace(/"/g, '""')}"`
                     ].join(','))
                 ].join('\n');
-
+                
                 const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
                 const link = document.createElement('a');
                 const url = URL.createObjectURL(blob);
