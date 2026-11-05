@@ -593,7 +593,7 @@ app.post("/api/outreach", async (req, res) => {
   }
 });
 
-// --- Endpoint to generate AI search queries ---
+// --- Endpoint to generate AI search queries (Fully Niche-Agnostic) ---
 app.post("/api/generate-queries", async (req, res) => {
   try {
     const { niche, targetAudience } = req.body;
@@ -610,20 +610,20 @@ app.post("/api/generate-queries", async (req, res) => {
     const openai = new OpenAI({ apiKey: OPENAI_API_KEY });
 
     const systemPrompt = `You are an expert YouTube SEO specialist and audience researcher.
-Generate 12 to 15 diverse, highly relevant YouTube search queries based on the given niche and target audience.
+Generate 12 to 15 diverse, highly targeted YouTube search queries for ANY niche provided by the user.
 
 Rules:
 1. Return ONLY a valid JSON object with a "queries" array of strings, e.g. {"queries": ["query 1", "query 2", ...]}.
-2. Include a mix of broad niche terms, tutorial topics, beginner questions, reviews, tool/software comparisons, and industry terminology relevant to this specific topic.
-3. NEVER add generic unrelated terms or hardcoded suffixes (like 'renovation', 'DIY', 'baking') unless directly relevant to the niche.
-4. Keep each query concise (1 to 4 words).
+2. DYNAMIC ANCHOR RULE: Every query MUST explicitly retain the core subject noun from the niche input ("${niche}"). Never drop the core subject to generate detached generic terms like "how to fix", "deals & reviews", or "maintenance guide" without the subject attached, as that causes false positives across unrelated industries.
+3. Target sub-categories, techniques, tools, common problems, and specific audience questions relevant to this topic.
+4. Keep each query between 2 and 5 words.
 
 Respond ONLY with JSON format: {"queries": ["query1", "query2", ...]}`;
 
     const userPrompt = `Niche: ${niche}\nTarget Audience: ${targetAudience || "General audience"}`;
 
     const response = await openai.chat.completions.create({
-      model: "gpt-4o-mini",
+      model: "gpt-5.4-mini",
       temperature: 0.7,
       messages: [
         { role: "system", content: systemPrompt },
@@ -644,7 +644,74 @@ Respond ONLY with JSON format: {"queries": ["query1", "query2", ...]}`;
     });
   } catch (err) {
     console.error("❌ Failed to generate AI queries:", err.message);
-    res.json({ success: false, queries: [] });
+    res.json({ success: false, queries: [niche] });
+  }
+});
+
+// --- Endpoint for Dynamic Batch AI Channel Relevance Evaluation ---
+app.post("/api/analyze-relevance", async (req, res) => {
+  try {
+    const { niche, targetAudience, channels } = req.body;
+
+    if (!channels || !Array.isArray(channels) || channels.length === 0) {
+      return res.json({ success: true, evaluations: {} });
+    }
+
+    if (!OPENAI_API_KEY) {
+      console.warn("⚠️ OPENAI_API_KEY not configured, skipping AI relevance filter");
+      return res.json({ success: false, evaluations: {} });
+    }
+
+    const openai = new OpenAI({ apiKey: OPENAI_API_KEY });
+
+    const systemPrompt = `You are an expert creator relevance filter for an influencer research platform.
+Evaluate whether each YouTube channel genuinely belongs to the target Niche and serves the Target Audience, or if it is an unrelated false positive.
+
+Classification Rules:
+- "Very High": The channel's primary focus directly matches this specific niche and audience.
+- "High": The channel frequently covers this niche alongside closely related topics.
+- "Medium": Broadly related, adjacent, or a multi-topic channel that partially covers the niche.
+- "Low": Definite false positive from an entirely different industry (e.g. watch repair or car repair when niche is home maintenance; or video games when niche is cooking).
+
+Return valid JSON with an "evaluations" object mapping channel ID to match level.
+Format:
+{
+  "evaluations": {
+    "CHANNEL_ID": { "match": "Very High" | "High" | "Medium" | "Low" }
+  }
+}`;
+
+    // Compact representation to conserve tokens and speed up inference
+    const candidateList = channels.map(c => ({
+      id: c.id,
+      name: c.name,
+      description: (c.description || "").slice(0, 250),
+      recentVideo: c.recentVideo ? c.recentVideo.title : ""
+    }));
+
+    const userPrompt = `Target Niche: ${niche}\nTarget Audience: ${targetAudience || "General"}\n\nChannels to evaluate:\n${JSON.stringify(candidateList, null, 2)}`;
+
+    const response = await openai.chat.completions.create({
+      model: "gpt-5.4-mini",
+      temperature: 0.1,
+      messages: [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: userPrompt }
+      ],
+      response_format: { type: "json_object" }
+    });
+
+    const parsed = JSON.parse(response.choices[0].message.content);
+    const evaluations = parsed.evaluations || parsed;
+
+    console.log(`🤖 AI evaluated relevance for ${Object.keys(evaluations).length} channels`);
+    res.json({
+      success: true,
+      evaluations: evaluations
+    });
+  } catch (err) {
+    console.error("❌ Relevance analysis failed:", err.message);
+    res.json({ success: false, evaluations: {} });
   }
 });
 
