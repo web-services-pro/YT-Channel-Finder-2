@@ -659,7 +659,7 @@ async function scrapeVideoCommentsWithApify(videoUrl, maxComments = 15) {
       startUrls: [{ url: videoUrl }],
       maxComments: maxComments,
       sortCommentsBy: "TOP_COMMENTS"
-    }, { timeoutSecs: 45 });
+    }, { timeout: 60 });
 
     const { items } = await client.dataset(run.defaultDatasetId).listItems();
     return items
@@ -689,11 +689,11 @@ app.post("/api/extract-emails-bulk", async (req, res) => {
   console.log(`🚀 Starting Apify bulk email extraction for ${channelUrls.length} channels...`);
 
   try {
-    // Attempt 1: Run lurkapi/youtube-channel-email-scraper (scans About page and external websites)
+    // Attempt 1: Run lurkapi/youtube-channel-email-scraper
     const run = await client.actor("lurkapi/youtube-channel-email-scraper").call({
       urls: channelUrls,
       scanLinkedWebsites: true
-    }, { timeoutSecs: 90 });
+    }, { timeout: 120 });
 
     const { items } = await client.dataset(run.defaultDatasetId).listItems();
     const resultsMap = {};
@@ -719,7 +719,8 @@ app.post("/api/extract-emails-bulk", async (req, res) => {
     try {
       const fallbackRun = await client.actor("exporter24/youtube-email-bulk-scraper").call({
         urls: channelUrls.map(url => ({ url }))
-      });
+      }, { timeout: 180 });
+
       const { items } = await client.dataset(fallbackRun.defaultDatasetId).listItems();
       const resultsMap = {};
       items.forEach(item => {
@@ -756,7 +757,7 @@ app.post("/api/extract-email-premium", async (req, res) => {
 
     const run = await client.actor("dataovercoffee/youtube-channel-business-email-scraper").call({
       channels: [target]
-    }, { timeoutSecs: 120 });
+    }, { timeout: 120 });
 
     const { items } = await client.dataset(run.defaultDatasetId).listItems();
     const result = items[0] || {};
@@ -795,7 +796,7 @@ app.post("/api/channel-lookalikes", async (req, res) => {
     const run = await client.actor("dataovercoffee/youtube-channel-lookalike-finder").call({
       seed_channel_ids: [seed],
       limit: Math.min(limit, 15)
-    }, { timeoutSecs: 180 });
+    }, { timeout: 180 });
 
     const { items } = await client.dataset(run.defaultDatasetId).listItems();
 
