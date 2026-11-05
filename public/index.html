@@ -986,32 +986,35 @@
     
                 // Step 4: Collect contact info (50-60%)
                 this.updateProgress(50, 'Collecting contact information...');
-                const contactChannels = await this.collectContactInfo(engagedChannels, formData.youtubeApiKey);
+                const contactChannels = await this.collectContactInfo(engagedChannels);
     
-                // Step 5: Get recent videos (60-75%)
+                // Step 5: Filter Top Candidates (prioritizes quota on the actual results)
+                const targetPoolSize = Math.min(formData.channelCount + 10, contactChannels.length);
+                const prioritizedCandidates = contactChannels.slice(0, targetPoolSize);
+
+                // Step 6: Get recent videos using 100x cheaper Playlist API (60-75%)
                 this.updateProgress(60, 'Fetching recent videos...');
-                const channelsWithVideos = await this.getRecentVideos(contactChannels, formData.youtubeApiKey);
+                const channelsWithVideos = await this.getRecentVideos(prioritizedCandidates);
     
-                // Step 6: Analyze audience match (75-85%)
-                this.updateProgress(75, 'Analyzing audience match...');
-                let matchedChannels = await this.analyzeAudienceMatch(channelsWithVideos, formData.targetAudience, formData.openaiApiKey);
-    
-                // Step 7: Bulk email extraction with Apify (85-95%)
+                // Step 7: Analyze audience match with AI (75-85%)
+                this.updateProgress(75, 'Analyzing audience match with AI...');
+                let matchedChannels = await this.analyzeAudienceMatch(channelsWithVideos, formData.niche, formData.targetAudience);
+                
+                // Select final requested channel count
+                let finalChannels = matchedChannels.slice(0, formData.channelCount);
+
+                // Step 8: Bulk email extraction with Apify ONLY for top channels missing an email (85-95%)
                 if (this.apifyAvailable) {
-                    this.updateProgress(85, 'Extracting emails with Apify...');
-                    // ✅ FIXED: Now operates on matchedChannels and reassigns the result
-                    matchedChannels = await this.extractEmailsWithApifyBulk(matchedChannels);
-                } else {
-                    console.warn('Apify not available, skipping bulk email extraction');
+                    this.updateProgress(85, 'Extracting missing emails with Apify...');
+                    finalChannels = await this.extractEmailsWithApifyBulk(finalChannels);
                 }
-    
-                // Step 8: Finalize results (95-100%)
+
+                // Step 9: Finalize results (95-100%)
                 this.updateProgress(95, 'Preparing results...');
-                this.foundChannels = matchedChannels.slice(0, formData.channelCount);
+                this.foundChannels = finalChannels;
     
                 this.updateProgress(100, 'Search complete!');
     
-                // Show results
                 setTimeout(() => {
                     this.showResults();
                 }, 500);
@@ -1084,7 +1087,15 @@
                         
                         for (const channel of channels) {
                             const subCount = channel.statistics?.subscriberCount ? parseInt(channel.statistics.subscriberCount) : 0;
-                            
+                            const country = (channel.snippet?.country || '').toUpperCase();
+
+                            // Filter out channels confirmed to be registered in other countries
+                            // (Keeps 'US' and unassigned profiles that passed the US region search)
+                            const isNonUS = country && country !== 'US';
+                            if (isNonUS) {
+                                continue;
+                            }
+
                             if (subCount >= minSubs && subCount <= maxSubs) {
                                 allChannels.set(channel.id, {
                                     id: channel.id,
@@ -1093,7 +1104,8 @@
                                     subscribers: subCount,
                                     description: channel.snippet.description || '',
                                     customUrl: channel.snippet.customUrl || '',
-                                    publishedAt: channel.snippet.publishedAt
+                                    publishedAt: channel.snippet.publishedAt,
+                                    country: country || 'US'
                                 });
                             }
                         }
@@ -1106,15 +1118,15 @@
                 
                 return Array.from(allChannels.values());
             }
-
+            
             async searchYouTubeChannels(query) {
                 const foundChannelIds = new Set();
                 
-                // 1. Fetch Page 1 and Page 2 of Channel Search (maxResults=50)
+                // 1. Fetch Channel Search with US regional bias (regionCode=US & relevanceLanguage=en)
                 let pageToken = '';
                 for (let page = 0; page < 2; page++) {
                     const tokenParam = pageToken ? `&pageToken=${pageToken}` : '';
-                    const searchUrl = `https://www.googleapis.com/youtube/v3/search?part=snippet&type=channel&q=${encodeURIComponent(query)}&maxResults=50${tokenParam}&key=${this.getNextApiKey()}`;
+                    const searchUrl = `https://www.googleapis.com/youtube/v3/search?part=snippet&type=channel&q=${encodeURIComponent(query)}&regionCode=US&relevanceLanguage=en&maxResults=50${tokenParam}&key=${this.getNextApiKey()}`;
                     
                     try {
                         const response = await fetch(searchUrl);
@@ -1133,9 +1145,9 @@
                     }
                 }
 
-                // 2. Secondary Search: Fetch top recent videos to discover active channels in niche
+                // 2. Fetch recent videos in the US to discover active creators
                 try {
-                    const videoSearchUrl = `https://www.googleapis.com/youtube/v3/search?part=snippet&type=video&q=${encodeURIComponent(query)}&order=date&maxResults=25&key=${this.getNextApiKey()}`;
+                    const videoSearchUrl = `https://www.googleapis.com/youtube/v3/search?part=snippet&type=video&q=${encodeURIComponent(query)}&regionCode=US&relevanceLanguage=en&order=date&maxResults=25&key=${this.getNextApiKey()}`;
                     const videoResponse = await fetch(videoSearchUrl);
                     if (videoResponse.ok) {
                         const videoData = await videoResponse.json();
@@ -1150,7 +1162,7 @@
                 const channelIdsArray = Array.from(foundChannelIds);
                 if (channelIdsArray.length === 0) return [];
                 
-                // Batch fetch channel details (up to 50 per request)
+                // Batch fetch channel details including country code (snippet.country)
                 const detailedChannels = [];
                 for (let i = 0; i < channelIdsArray.length; i += 50) {
                     const chunk = channelIdsArray.slice(i, i + 50).join(',');
@@ -1165,7 +1177,7 @@
                 
                 return detailedChannels;
             }
-
+            
             async analyzeEngagement(channels, minEngagement) {
                 const analyzedChannels = [];
                 const progressStep = 20 / (channels.length || 1);
@@ -1277,13 +1289,17 @@
                     return channels;
                 }
 
+                // Filter down to only channels that are missing an email
+                const channelsNeedingEmail = channels.filter(ch => !ch.email);
+                if (channelsNeedingEmail.length === 0) {
+                    console.log("✅ All selected channels already have emails. Skipping Apify bulk run.");
+                    return channels;
+                }
+
                 try {
-                    // Prepare channel URLs for Apify
-                    const channelUrls = channels.map(ch => ch.url);
-        
-                    console.log(`📨 Sending ${channelUrls.length} channels to Apify for bulk email extraction...`);
-        
-                    // Call the server endpoint
+                    const channelUrls = channelsNeedingEmail.map(ch => ch.url);
+                    console.log(`📨 Sending ${channelUrls.length} channels without emails to Apify...`);
+
                     const response = await fetch('/api/extract-emails-bulk', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
@@ -1295,42 +1311,36 @@
                     }
 
                     const data = await response.json();
-        
                     if (!data.success) {
-                        console.warn('Apify extraction failed:', data.error);
+                        console.warn('Apify extraction returned false status:', data.error);
                         return channels;
                     }
 
-                    // Merge Apify results back into channels
                     const enrichedChannels = channels.map(channel => {
-                        const apifyResult = data.results[channel.url];
-            
+                        const apifyResult = data.results ? data.results[channel.url] : null;
+
                         if (apifyResult && apifyResult.emails && apifyResult.emails.length > 0) {
                             console.log(`✅ Apify found ${apifyResult.emails.length} emails for ${channel.name}`);
-                
-                            // Merge Apify emails with existing emails (remove duplicates)
                             const allEmails = [...new Set([
                                 ...(channel.emails || []),
                                 ...apifyResult.emails
                             ])];
-                
+
                             return {
                                 ...channel,
                                 emails: allEmails,
-                                email: allEmails[0] || '', // Update primary email if found
-                                emailAvailable: allEmails.length > 0,
+                                email: allEmails[0] || channel.email || '',
+                                emailAvailable: true,
                                 apifyStatus: apifyResult.status
                             };
                         }
-            
                         return channel;
                     });
 
                     return enrichedChannels;
-        
                 } catch (error) {
                     console.error('❌ Bulk email extraction failed:', error.message);
-                    return channels; // Return original channels if Apify fails
+                    return channels;
                 }
             }
             
@@ -1561,57 +1571,66 @@
             }
             
             async getRecentVideos(channels) {
-                const progressStep = 10 / channels.length;
+                const progressStep = 15 / (channels.length || 1);
 
                 for (let i = 0; i < channels.length; i++) {
                     const channel = channels[i];
-                    this.updateProgress(80 + (i * progressStep), `Fetching recent videos for ${channel.name}...`);
+                    this.updateProgress(60 + (i * progressStep), `Fetching recent videos for ${channel.name}...`);
 
                     try {
-                        // Get last 5 videos
-                        const videosUrl = `https://www.googleapis.com/youtube/v3/search?part=snippet&channelId=${channel.id}&type=video&order=date&maxResults=5&key=${this.getNextApiKey()}`;
-                        const searchResp = await fetch(videosUrl);
-                        if (!searchResp.ok) throw new Error(`YouTube API error: ${searchResp.status}`);
+                        let videoDetails = [];
 
-                        const searchData = await searchResp.json();
-                        const videoItems = searchData.items || [];
-                        if (videoItems.length === 0) {
-                            channel.recentVideos = [];
-                            channel.recentVideo = null;
-                            continue;
+                        // 100x Quota Reduction: Every YouTube channel's upload playlist ID is "UU" + channelId without "UC"
+                        // playlistItems.list costs ONLY 1 quota unit, compared to search.list which costs 100 units!
+                        const uploadsPlaylistId = channel.id.startsWith("UC") ? "UU" + channel.id.substring(2) : null;
+
+                        if (uploadsPlaylistId) {
+                            try {
+                                const playlistUrl = `https://www.googleapis.com/youtube/v3/playlistItems?part=snippet&playlistId=${uploadsPlaylistId}&maxResults=5&key=${this.getNextApiKey()}`;
+                                const playlistResp = await fetch(playlistUrl);
+                                if (playlistResp.ok) {
+                                    const pData = await playlistResp.json();
+                                    videoDetails = (pData.items || []).map(item => ({
+                                        id: item.snippet?.resourceId?.videoId,
+                                        title: item.snippet?.title || "",
+                                        description: item.snippet?.description || "",
+                                        publishedAt: item.snippet?.publishedAt || "",
+                                        url: `https://www.youtube.com/watch?v=${item.snippet?.resourceId?.videoId}`,
+                                        stats: {}
+                                    })).filter(v => v.id);
+                                }
+                            } catch (pErr) {
+                                console.warn(`PlaylistItems lookup fallback for ${channel.name}:`, pErr.message);
+                            }
                         }
 
-                        // Extract video IDs
-                        const videoIds = videoItems.map(v => v.id.videoId).join(",");
+                        // Fallback: If playlist lookup was empty, run a single search.list call
+                        if (videoDetails.length === 0) {
+                            const videosUrl = `https://www.googleapis.com/youtube/v3/search?part=snippet&channelId=${channel.id}&type=video&order=date&maxResults=5&key=${this.getNextApiKey()}`;
+                            const searchResp = await fetch(videosUrl);
+                            if (searchResp.ok) {
+                                const searchData = await searchResp.json();
+                                videoDetails = (searchData.items || []).map(v => ({
+                                    id: v.id?.videoId,
+                                    title: v.snippet?.title || "",
+                                    description: v.snippet?.description || "",
+                                    publishedAt: v.snippet?.publishedAt || "",
+                                    url: `https://www.youtube.com/watch?v=${v.id?.videoId}`,
+                                    stats: {}
+                                })).filter(v => v.id);
+                            }
+                        }
 
-                        // Fetch video details
-                        const detailsUrl = `https://www.googleapis.com/youtube/v3/videos?part=snippet,statistics&id=${videoIds}&key=${this.getNextApiKey()}`;
-                        const detailsResp = await fetch(detailsUrl);
-                        if (!detailsResp.ok) throw new Error(`YouTube API error: ${detailsResp.status}`);
+                        channel.recentVideos = videoDetails;
+                        channel.recentVideo = videoDetails[0] || null;
 
-                        const detailsData = await detailsResp.json();
-                        const details = detailsData.items || [];
-
-                        channel.recentVideos = details.map(v => ({
-                            id: v.id,
-                            title: v.snippet.title,
-                            description: v.snippet.description || "",
-                            publishedAt: v.snippet.publishedAt,
-                            url: `https://www.youtube.com/watch?v=${v.id}`,
-                            stats: v.statistics || {}
-                        }));
-
-                        // Pick most recent video for display
-                        channel.recentVideo = channel.recentVideos[0];
-
-                        // Extract additional URLs from video descriptions (but don't overwrite existing data)
+                        // Extract additional links from video descriptions
                         const videoUrls = [];
                         for (const video of channel.recentVideos) {
                             const videoExtraction = this.urlExtractor.extractAllContactInfo(video.description);
                             videoUrls.push(...(videoExtraction.allUrls || []));
                         }
 
-                        // Only add video URLs if we don't already have social media links
                         if (!channel.instagram && !channel.twitter && !channel.facebook) {
                             const videoSocials = this.urlExtractor.categorizeSocialMedia(videoUrls);
                             channel.instagram = channel.instagram || videoSocials.instagram || '';
@@ -1622,10 +1641,7 @@
                             channel.patreon = channel.patreon || videoSocials.patreon || '';
                         }
 
-                        // 1. Calculate engagement rate first
-                        this.calculateChannelEngagementRate(channel);
-
-                        // 2. Deep re-analysis of monetization using recent video descriptions and all extracted links
+                        // Re-evaluate monetization using recent video descriptions
                         channel.monetization = this.analyzeMonetization(
                             channel.description,
                             channel.status || {},
@@ -1635,17 +1651,18 @@
                             channel.website ? [channel.website] : []
                         );
 
-                        // 3. Derive baseline algorithmic monetization potential
                         channel.monetizationPotential = this.deriveMonetizationPotential(channel);
 
-                        // 4. Generate AI outreach & personalized monetization angle
+                        // Generate personalized outreach & monetization pitch
                         await this.generateOutreachForChannel(channel);
 
-                        await this.delay(100); // rate limiting
+                        await this.delay(60);
                     } catch (error) {
-                        console.warn(`Failed to fetch recent videos for ${channel.name}:`, error.message);
+                        console.warn(`Failed to process recent videos for ${channel.name}:`, error.message);
                         channel.recentVideos = [];
                         channel.recentVideo = null;
+                        channel.monetization = channel.monetization || "Unknown";
+                        channel.monetizationPotential = this.deriveMonetizationPotential(channel);
                     }
                 }
 
@@ -1720,79 +1737,88 @@
                     : 0;
             }
             
-            async analyzeAudienceMatch(channels, targetAudience, openaiApiKey) {
-                const progressStep = 5 / channels.length;
-                
-                for (let i = 0; i < channels.length; i++) {
-                    const channel = channels[i];
-                    this.updateProgress(90 + (i * progressStep), `Analyzing audience match for ${channel.name}...`);
-                    
-                    if (openaiApiKey) {
-                        try {
-                            channel.audienceMatch = await this.getAudienceMatch(channel, targetAudience, openaiApiKey);
-                        } catch (error) {
-                            channel.audienceMatch = 'Medium';
+            async analyzeAudienceMatch(channels, niche, targetAudience) {
+                if (!channels || channels.length === 0) return [];
+
+                try {
+                    // Send candidate channels to AI in a single batch
+                    const response = await fetch('/api/analyze-relevance', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            niche,
+                            targetAudience,
+                            channels: channels.map(c => ({
+                                id: c.id,
+                                name: c.name,
+                                description: c.description,
+                                recentVideo: c.recentVideo ? { title: c.recentVideo.title } : null
+                            }))
+                        })
+                    });
+
+                    if (response.ok) {
+                        const data = await response.json();
+                        if (data.success && data.evaluations) {
+                            channels.forEach(ch => {
+                                const evalResult = data.evaluations[ch.id];
+                                ch.audienceMatch = evalResult?.match || 'Medium';
+                            });
                         }
-                    } else {
-                        // Simple keyword matching fallback
-                        channel.audienceMatch = this.getSimpleAudienceMatch(channel, targetAudience);
                     }
-                    
-                    await this.delay(50);
+                } catch (err) {
+                    console.warn("AI relevance batch call failed, using dynamic semantic fallback:", err.message);
                 }
-                
-                // Sort by engagement rate and audience match
-                return channels.sort((a, b) => {
-                    const matchOrder = { 'Very High': 5, 'High': 4, 'Medium': 3, 'Low': 2, 'Very Low': 1 };
-                    const aScore = (matchOrder[a.audienceMatch] || 3) * 10 + a.engagementRate;
-                    const bScore = (matchOrder[b.audienceMatch] || 3) * 10 + b.engagementRate;
-                    return bScore - aScore;
+
+                // If any channel was not evaluated by AI, apply dynamic semantic fallback (Zero hardcoding)
+                channels.forEach(ch => {
+                    if (!ch.audienceMatch || ch.audienceMatch === 'Medium') {
+                        ch.audienceMatch = this.getDynamicAudienceMatch(ch, niche, targetAudience);
+                    }
                 });
+
+                // Separate relevant channels from off-topic false positives ('Low')
+                const relevantChannels = channels.filter(c => c.audienceMatch !== 'Low');
+                const lowMatches = channels.filter(c => c.audienceMatch === 'Low');
+
+                // Sort: prioritize match quality first ('Very High' > 'High' > 'Medium'), then engagement rate
+                const matchOrder = { 'Very High': 4, 'High': 3, 'Medium': 2, 'Low': 1 };
+                const sortFn = (a, b) => {
+                    const aScore = (matchOrder[a.audienceMatch] || 2) * 20 + Math.min(a.engagementRate || 0, 15);
+                    const bScore = (matchOrder[b.audienceMatch] || 2) * 20 + Math.min(b.engagementRate || 0, 15);
+                    return bScore - aScore;
+                };
+
+                relevantChannels.sort(sortFn);
+                lowMatches.sort(sortFn);
+
+                // Use high/medium relevance channels first; backfill with low matches only if pool is critically small
+                return relevantChannels.length >= 10 ? relevantChannels : [...relevantChannels, ...lowMatches];
             }
 
-            async getAudienceMatch(channel, targetAudience, openaiApiKey) {
-                // Simulate OpenAI analysis
-                await this.delay(200);
-                
-                const matches = ['Very High', 'High', 'Medium', 'Low', 'Very Low'];
-                const keywords = targetAudience.toLowerCase().split(' ');
-                const description = channel.description.toLowerCase();
-                
-                let matchCount = 0;
-                for (const keyword of keywords) {
-                    if (description.includes(keyword)) {
-                        matchCount++;
-                    }
-                }
-                
-                const matchRatio = matchCount / keywords.length;
-                
-                if (matchRatio >= 0.7) return 'Very High';
-                if (matchRatio >= 0.5) return 'High';
-                if (matchRatio >= 0.3) return 'Medium';
-                if (matchRatio >= 0.1) return 'Low';
-                return 'Very Low';
-            }
+            // Universal, 100% niche-agnostic fallback: extracts meaningful nouns/verbs from user inputs dynamically
+            getDynamicAudienceMatch(channel, niche, targetAudience) {
+                const combinedInput = `${niche} ${targetAudience}`.toLowerCase();
+                const channelText = `${channel.name} ${channel.description} ${channel.recentVideo ? channel.recentVideo.title : ''}`.toLowerCase();
 
-            getSimpleAudienceMatch(channel, targetAudience) {
-                const keywords = targetAudience.toLowerCase().split(' ');
-                const description = channel.description.toLowerCase();
-                const name = channel.name.toLowerCase();
-                
-                let matchCount = 0;
-                for (const keyword of keywords) {
-                    if (description.includes(keyword) || name.includes(keyword)) {
-                        matchCount++;
-                    }
-                }
-                
-                const matchRatio = matchCount / keywords.length;
-                
-                if (matchRatio >= 0.6) return 'High';
-                if (matchRatio >= 0.3) return 'Medium';
+                // Strip universal English stop words
+                const stopWords = new Set(['who', 'want', 'to', 'maintain', 'their', 'and', 'for', 'the', 'a', 'an', 'in', 'of', 'with', 'on', 'is', 'at', 'by', 'from', 'best', 'more', 'how', 'do']);
+                const keyTerms = combinedInput
+                    .replace(/[^a-z0-9\s]/g, '')
+                    .split(/\s+/)
+                    .filter(w => w.length > 2 && !stopWords.has(w));
+
+                if (keyTerms.length === 0) return 'Medium';
+
+                const matches = keyTerms.filter(term => channelText.includes(term)).length;
+                const matchRatio = matches / keyTerms.length;
+
+                if (matchRatio >= 0.5) return 'Very High';
+                if (matchRatio >= 0.25) return 'High';
+                if (matches >= 1) return 'Medium';
                 return 'Low';
             }
-
+            
             showResults() {
                 document.getElementById('progressSection').style.display = 'none';
                 document.getElementById('resultsSection').style.display = 'block';
