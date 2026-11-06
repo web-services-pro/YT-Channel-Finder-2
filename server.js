@@ -530,15 +530,13 @@ app.get("/api/scrape-about", async (req, res) => {
   }
 });
 
-// Updated outreach endpoint with automatic comment mining
-// Updated outreach endpoint with automatic comment mining & monetization potential
+// Updated outreach endpoint with automatic comment mining & monetization potential, with full 6-step cold email sequence generation
 app.post("/api/outreach", async (req, res) => {
   try {
-    const { channelName, description, recentVideos, ownerName, currentMonetization, subscribers, engagementRate } = req.body;
+    const { channelName, description, recentVideos, ownerName, currentMonetization, monetizationPotential, subscribers, engagementRate } = req.body;
     let comments = Array.isArray(req.body.recentComments) ? req.body.recentComments : [];
 
-    console.log(`🚀 Outreach & Monetization request for: ${channelName}`);
-    console.log(`Initial comments provided: ${comments.length}`);
+    console.log(`🚀 Outreach & Sequence generation request for: ${channelName}`);
 
     // If comments are missing, attempt to mine them from the most recent video
     if (comments.length === 0 && Array.isArray(recentVideos) && recentVideos.length > 0) {
@@ -551,14 +549,14 @@ app.post("/api/outreach", async (req, res) => {
         comments = await fetchVideoComments(videoId, apiKey, 15);
       }
 
-      // Attempt 2: If YouTube API returned 0 (or was blocked/quota exhausted), mine via Apify
+      // Attempt 2: If YouTube API returned 0, mine via Apify
       if (comments.length === 0 && topVideo.url && typeof scrapeVideoCommentsWithApify === 'function') {
         console.log(`⛏️ Mining comments via Apify for video: ${topVideo.url}`);
         comments = await scrapeVideoCommentsWithApify(topVideo.url, 15);
       }
     }
 
-    console.log(`💬 Total comments fed into outreach copywriter: ${comments.length}`);
+    console.log(`💬 Comments fed into copywriter: ${comments.length}`);
 
     const outreach = await generatePersonalizedOutreach({
       channelName,
@@ -567,18 +565,30 @@ app.post("/api/outreach", async (req, res) => {
       recentComments: comments,
       ownerName: ownerName || "",
       currentMonetization: currentMonetization || "Unknown",
+      monetizationPotential: monetizationPotential || "",
       subscribers: subscribers || 0,
       engagementRate: engagementRate || 0,
       openaiApiKey: OPENAI_API_KEY
     });
-
-    console.log(`✅ Outreach result for ${channelName}:`, outreach);
 
     res.json({
       success: true,
       aiSubjectLine: outreach.subjectLine,
       aiFirstLine: outreach.firstLine,
       monetizationPotential: outreach.monetizationPotential || "",
+      sequence: outreach.sequence || [],
+      email1Subject: outreach.email1Subject || "",
+      email1Body: outreach.email1Body || "",
+      email2Subject: outreach.email2Subject || "",
+      email2Body: outreach.email2Body || "",
+      email3Subject: outreach.email3Subject || "",
+      email3Body: outreach.email3Body || "",
+      email4Subject: outreach.email4Subject || "",
+      email4Body: outreach.email4Body || "",
+      email5Subject: outreach.email5Subject || "",
+      email5Body: outreach.email5Body || "",
+      email6Subject: outreach.email6Subject || "",
+      email6Body: outreach.email6Body || "",
       commentsUsed: comments.length
     });
   } catch (err) {
@@ -588,7 +598,8 @@ app.post("/api/outreach", async (req, res) => {
       success: false,
       aiSubjectLine: "",
       aiFirstLine: "",
-      monetizationPotential: ""
+      monetizationPotential: "",
+      sequence: []
     });
   }
 });
