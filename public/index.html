@@ -431,6 +431,26 @@
         <div id="errorContainer"></div>
     </div>
 
+    <!-- 6-Step Outreach Sequence Viewer Modal -->
+    <div id="sequenceModal" style="display:none; position:fixed; z-index:99999; left:0; top:0; width:100%; height:100%; background:rgba(0,0,0,0.65); overflow-y:auto; padding:20px; box-sizing:border-box;">
+        <div style="background:white; max-width:850px; margin:30px auto; border-radius:16px; padding:30px; box-shadow:0 20px 40px rgba(0,0,0,0.3); position:relative;">
+            <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:2px solid #edf2f7; padding-bottom:15px; margin-bottom:20px;">
+                <div>
+                    <h2 id="modalChannelName" style="color:#2d3748; font-size:1.4rem; margin:0 0 4px 0;">Outreach Sequence</h2>
+                    <span id="modalChannelSub" style="font-size:0.85rem; color:#718096;">6-Step Automation Campaign</span>
+                </div>
+                <button onclick="document.getElementById('sequenceModal').style.display='none'" style="background:#edf2f7; border:none; width:36px; height:36px; border-radius:50%; font-size:1.2rem; cursor:pointer; color:#4a5568; display:flex; align-items:center; justify-content:center;">&times;</button>
+            </div>
+            <div id="modalSequenceContent" style="display:flex; flex-direction:column; gap:16px;"></div>
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-top:25px; padding-top:15px; border-top:1px solid #edf2f7;">
+                <button onclick="window.finderApp.copyEntireSequence()" style="padding:10px 18px; background:#48bb78; color:white; border:none; border-radius:8px; cursor:pointer; font-weight:600; font-size:0.9rem;">
+                    📋 Copy All 6 Emails
+                </button>
+                <button onclick="document.getElementById('sequenceModal').style.display='none'" style="padding:10px 20px; background:#e2e8f0; color:#4a5568; border:none; border-radius:8px; cursor:pointer; font-weight:600;">Close</button>
+            </div>
+        </div>
+    </div>
+    
     <script>
         // Enhanced URL Extractor Class
         class EnhancedURLExtractor {
@@ -1671,7 +1691,7 @@
             
             async generateOutreachForChannel(channel) {
                 try {
-                    console.log(`🎯 Starting outreach & monetization generation for ${channel.name}...`);
+                    console.log(`🎯 Generating 6-step outreach sequence for ${channel.name}...`);
 
                     const outreachResp = await fetch("/api/outreach", {
                         method: "POST",
@@ -1688,6 +1708,7 @@
                             recentComments: channel.recentComments || [],
                             ownerName: channel.name,
                             currentMonetization: channel.monetization || "Unknown",
+                            monetizationPotential: channel.monetizationPotential || "",
                             subscribers: channel.subscribers || 0,
                             engagementRate: parseFloat((channel.engagementRate || 0).toFixed(2))
                         })
@@ -1705,10 +1726,25 @@
                         channel.monetizationPotential = outreachData.monetizationPotential;
                     }
 
+                    channel.sequence = outreachData.sequence || [];
+                    channel.email1Subject = outreachData.email1Subject || (channel.sequence[0]?.subject || channel.aiSubjectLine);
+                    channel.email1Body = outreachData.email1Body || (channel.sequence[0]?.body || channel.aiFirstLine);
+                    channel.email2Subject = outreachData.email2Subject || (channel.sequence[1]?.subject || "");
+                    channel.email2Body = outreachData.email2Body || (channel.sequence[1]?.body || "");
+                    channel.email3Subject = outreachData.email3Subject || (channel.sequence[2]?.subject || "");
+                    channel.email3Body = outreachData.email3Body || (channel.sequence[2]?.body || "");
+                    channel.email4Subject = outreachData.email4Subject || (channel.sequence[3]?.subject || "");
+                    channel.email4Body = outreachData.email4Body || (channel.sequence[3]?.body || "");
+                    channel.email5Subject = outreachData.email5Subject || (channel.sequence[4]?.subject || "");
+                    channel.email5Body = outreachData.email5Body || (channel.sequence[4]?.body || "");
+                    channel.email6Subject = outreachData.email6Subject || (channel.sequence[5]?.subject || "");
+                    channel.email6Body = outreachData.email6Body || (channel.sequence[5]?.body || "");
+
                 } catch (err) {
-                    console.error(`❌ Outreach generation failed for ${channel.name}:`, err);
+                    console.error(`❌ Outreach sequence generation failed for ${channel.name}:`, err);
                     channel.aiSubjectLine = "";
                     channel.aiFirstLine = "";
+                    channel.sequence = [];
                 }
             }
             
@@ -1933,6 +1969,75 @@
                     tbody.appendChild(row);
                 });
             }
+      
+            viewSequence(index) {
+                const channel = this.foundChannels[index];
+                if (!channel) return;
+
+                const modal = document.getElementById('sequenceModal');
+                const title = document.getElementById('modalChannelName');
+                const sub = document.getElementById('modalChannelSub');
+                const content = document.getElementById('modalSequenceContent');
+
+                title.textContent = `Outreach Campaign for ${channel.name}`;
+                sub.textContent = `Target Potential: ${channel.monetizationPotential || 'Digital Products & Paid Community'}`;
+                content.innerHTML = '';
+
+                this.activeModalChannel = channel;
+
+                const sequence = channel.sequence && channel.sequence.length > 0 
+                    ? channel.sequence 
+                    : [
+                        { step: 1, title: "Observation & Pain Point Hook", subject: channel.email1Subject || channel.aiSubjectLine, body: channel.email1Body || channel.aiFirstLine },
+                        { step: 2, title: "The Monetization Gap", subject: channel.email2Subject, body: channel.email2Body },
+                        { step: 3, title: "The Value Asset Offer", subject: channel.email3Subject, body: channel.email3Body },
+                        { step: 4, title: "Social Proof & Volatility Angle", subject: channel.email4Subject, body: channel.email4Body },
+                        { step: 5, title: "Low-Friction 2-Line Bump", subject: channel.email5Subject, body: channel.email5Body },
+                        { step: 6, title: "Permission to Close File", subject: channel.email6Subject, body: channel.email6Body }
+                    ].filter(e => e.body || e.subject);
+
+                sequence.forEach((item, i) => {
+                    const stepNum = item.step || (i + 1);
+                    const stepTitle = item.title || `Email ${stepNum}`;
+                    const subject = item.subject || `Email ${stepNum}`;
+                    const body = item.body || '';
+
+                    const card = document.createElement('div');
+                    card.style.cssText = 'background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; padding: 16px;';
+                    card.innerHTML = `
+                        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+                            <span style="font-weight:700; color:#3182ce; font-size:0.9rem;">Step ${stepNum}: ${this.escapeHtml(stepTitle)}</span>
+                            <button onclick="navigator.clipboard.writeText(this.getAttribute('data-copy')); this.textContent='Copied!'; setTimeout(() => this.textContent='📋 Copy Email', 1500);" 
+                                    data-copy="Subject: ${this.escapeHtml(subject)}\n\n${this.escapeHtml(body)}"
+                                    style="padding:4px 10px; font-size:0.75rem; background:#edf2f7; border:1px solid #cbd5e0; border-radius:5px; cursor:pointer; font-weight:600;">
+                                📋 Copy Email
+                            </button>
+                        </div>
+                        <div style="font-size:0.85rem; color:#2d3748; margin-bottom:8px;"><strong>Subject:</strong> ${this.escapeHtml(subject)}</div>
+                        <div style="font-size:0.85rem; color:#4a5568; white-space:pre-wrap; background:white; padding:12px; border-radius:8px; border:1px solid #edf2f7; line-height:1.45;">${this.escapeHtml(body)}</div>
+                    `;
+                    content.appendChild(card);
+                });
+
+                modal.style.display = 'block';
+            }
+
+            copyEntireSequence() {
+                if (!this.activeModalChannel) return;
+                const ch = this.activeModalChannel;
+                const emails = [
+                    `=== STEP 1: ${ch.email1Subject} ===\n${ch.email1Body}`,
+                    `=== STEP 2: ${ch.email2Subject} ===\n${ch.email2Body}`,
+                    `=== STEP 3: ${ch.email3Subject} ===\n${ch.email3Body}`,
+                    `=== STEP 4: ${ch.email4Subject} ===\n${ch.email4Body}`,
+                    `=== STEP 5: ${ch.email5Subject} ===\n${ch.email5Body}`,
+                    `=== STEP 6: ${ch.email6Subject} ===\n${ch.email6Body}`
+                ].join('\n\n' + '-'.repeat(40) + '\n\n');
+
+                navigator.clipboard.writeText(emails).then(() => {
+                    alert(`Copied all 6 sequence emails for ${ch.name} to clipboard!`);
+                });
+            }
 
             async unlockPremiumEmail(index) {
                 const channel = this.foundChannels[index];
@@ -2061,6 +2166,18 @@
                     'Monetization Potential',
                     'Other Links',
                     'Description',
+                    'Email 1 Subject',
+                    'Email 1 Body',
+                    'Email 2 Subject',
+                    'Email 2 Body',
+                    'Email 3 Subject',
+                    'Email 3 Body',
+                    'Email 4 Subject',
+                    'Email 4 Body',
+                    'Email 5 Subject',
+                    'Email 5 Body',
+                    'Email 6 Subject',
+                    'Email 6 Body',
                     'aiSubjectLine',
                     'aiFirstLine'
                 ];
@@ -2092,6 +2209,18 @@
                               : ''
                             ).replace(/"/g, '""')}"`,
                         `"${(channel.description || '').replace(/"/g, '""').substring(0, 500)}"`,
+                        `"${(channel.email1Subject || channel.aiSubjectLine || '').replace(/"/g, '""')}"`,
+                        `"${(channel.email1Body || channel.aiFirstLine || '').replace(/"/g, '""')}"`,
+                        `"${(channel.email2Subject || '').replace(/"/g, '""')}"`,
+                        `"${(channel.email2Body || '').replace(/"/g, '""')}"`,
+                        `"${(channel.email3Subject || '').replace(/"/g, '""')}"`,
+                        `"${(channel.email3Body || '').replace(/"/g, '""')}"`,
+                        `"${(channel.email4Subject || '').replace(/"/g, '""')}"`,
+                        `"${(channel.email4Body || '').replace(/"/g, '""')}"`,
+                        `"${(channel.email5Subject || '').replace(/"/g, '""')}"`,
+                        `"${(channel.email5Body || '').replace(/"/g, '""')}"`,
+                        `"${(channel.email6Subject || '').replace(/"/g, '""')}"`,
+                        `"${(channel.email6Body || '').replace(/"/g, '""')}"`,
                         `"${(channel.aiSubjectLine || '').replace(/"/g, '""')}"`,
                         `"${(channel.aiFirstLine || '').replace(/"/g, '""')}"`
                     ].join(','))
