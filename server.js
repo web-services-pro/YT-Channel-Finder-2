@@ -530,10 +530,20 @@ app.get("/api/scrape-about", async (req, res) => {
   }
 });
 
-// Updated outreach endpoint with automatic comment mining & monetization potential, with full 6-step cold email sequence generation
+// Updated outreach endpoint with full 6-step cold email sequence generation & Product Context
 app.post("/api/outreach", async (req, res) => {
   try {
-    const { channelName, description, recentVideos, ownerName, currentMonetization, monetizationPotential, subscribers, engagementRate } = req.body;
+    const {
+      channelName,
+      description,
+      recentVideos,
+      ownerName,
+      currentMonetization,
+      monetizationPotential,
+      subscribers,
+      engagementRate,
+      productContext
+    } = req.body;
     let comments = Array.isArray(req.body.recentComments) ? req.body.recentComments : [];
 
     console.log(`🚀 Outreach & Sequence generation request for: ${channelName}`);
@@ -568,6 +578,7 @@ app.post("/api/outreach", async (req, res) => {
       monetizationPotential: monetizationPotential || "",
       subscribers: subscribers || 0,
       engagementRate: engagementRate || 0,
+      productContext: productContext || null,
       openaiApiKey: OPENAI_API_KEY
     });
 
@@ -604,13 +615,14 @@ app.post("/api/outreach", async (req, res) => {
   }
 });
 
-// --- Endpoint to generate AI search queries (Fully Niche-Agnostic) ---
+// --- Endpoint to generate AI search queries (Supports General Niche OR Product/Service Context) ---
 app.post("/api/generate-queries", async (req, res) => {
   try {
-    const { niche, targetAudience } = req.body;
+    const { niche, targetAudience, productContext } = req.body;
+    const hasProduct = !!(productContext && productContext.name && productContext.name.trim().length > 0);
 
-    if (!niche) {
-      return res.status(400).json({ error: "Niche is required" });
+    if (!niche && !hasProduct) {
+      return res.status(400).json({ error: "Niche or Product Context is required" });
     }
 
     if (!OPENAI_API_KEY) {
@@ -620,7 +632,29 @@ app.post("/api/generate-queries", async (req, res) => {
 
     const openai = new OpenAI({ apiKey: OPENAI_API_KEY });
 
-    const systemPrompt = `You are an expert YouTube SEO specialist and audience researcher.
+    let systemPrompt = "";
+    let userPrompt = "";
+
+    if (hasProduct) {
+      systemPrompt = `You are an expert influencer marketing strategist and YouTube SEO specialist.
+A creator/business wants to find YouTube channels whose audiences would buy their product or service via affiliate partnerships, joint ventures, or sponsorships.
+
+Analyze their Product/Service details and generate 12 to 15 targeted YouTube search queries to discover creators whose viewers match the ideal buyer profile.
+
+Rules:
+1. Return ONLY a valid JSON object with a "queries" array of strings AND an "inferredNiches" array of 3-4 target creator niches:
+   {"queries": ["query 1", "query 2", ...], "inferredNiches": ["niche 1", "niche 2"]}
+2. Every search query MUST be specific to the buyer's problem, niche, or topic so YouTube returns relevant creators—NEVER output detached generic words like "how to fix" or "reviews" without the topic attached.
+3. Keep each query between 2 and 5 words.`;
+
+      userPrompt = `Product / Service Name: ${productContext.name}
+Category: ${productContext.category || "Digital Product / Service"}
+What It Is: ${productContext.description || "N/A"}
+Price: $${productContext.price || "N/A"}
+Who Buys It (Ideal Buyer): ${productContext.buyerPersona || targetAudience || "N/A"}
+Optional Target Creator Niches: ${productContext.targetNiches || niche || "Auto-infer best niches from product"}`;
+    } else {
+      systemPrompt = `You are an expert YouTube SEO specialist and audience researcher.
 Generate 12 to 15 diverse, highly targeted YouTube search queries for ANY niche provided by the user.
 
 Rules:
@@ -631,7 +665,8 @@ Rules:
 
 Respond ONLY with JSON format: {"queries": ["query1", "query2", ...]}`;
 
-    const userPrompt = `Niche: ${niche}\nTarget Audience: ${targetAudience || "General audience"}`;
+      userPrompt = `Niche: ${niche}\nTarget Audience: ${targetAudience || "General audience"}`;
+    }
 
     const response = await openai.chat.completions.create({
       model: "gpt-5.4-mini",
@@ -646,23 +681,25 @@ Respond ONLY with JSON format: {"queries": ["query1", "query2", ...]}`;
     const content = response.choices[0].message.content;
     const parsed = JSON.parse(content);
     const queries = Array.isArray(parsed) ? parsed : (parsed.queries || parsed.searchQueries || []);
+    const inferredNiches = parsed.inferredNiches || [];
 
-    console.log(`✅ Generated ${queries.length} AI search queries for niche "${niche}"`);
+    console.log(`✅ Generated ${queries.length} AI search queries (Mode: ${hasProduct ? 'Product: ' + productContext.name : 'Niche: ' + niche})`);
 
     res.json({
       success: true,
-      queries: queries.length > 0 ? queries : [niche]
+      queries: queries.length > 0 ? queries : [hasProduct ? productContext.name : niche],
+      inferredNiches
     });
   } catch (err) {
     console.error("❌ Failed to generate AI queries:", err.message);
-    res.json({ success: false, queries: [niche] });
+    res.json({ success: false, queries: [] });
   }
 });
 
 // --- Endpoint for Dynamic Batch AI Channel Relevance Evaluation ---
 app.post("/api/analyze-relevance", async (req, res) => {
   try {
-    const { niche, targetAudience, channels } = req.body;
+    const { niche, targetAudience, productContext, channels } = req.body;
 
     if (!channels || !Array.isArray(channels) || channels.length === 0) {
       return res.json({ success: true, evaluations: {} });
@@ -674,25 +711,24 @@ app.post("/api/analyze-relevance", async (req, res) => {
     }
 
     const openai = new OpenAI({ apiKey: OPENAI_API_KEY });
+    const hasProduct = !!(productContext && productContext.name && productContext.name.trim().length > 0);
 
-    const systemPrompt = `You are an expert creator relevance filter for an influencer research platform.
-Evaluate whether each YouTube channel genuinely belongs to the target Niche and serves the Target Audience, or if it is an unrelated false positive.
+    const systemPrompt = `You are an expert creator relevance filter for an influencer research and partnership platform.
+Evaluate whether each YouTube channel genuinely reaches the target buyers/audience and fits the search criteria, or if it is an unrelated false positive.
 
 Classification Rules:
-- "Very High": The channel's primary focus directly matches this specific niche and audience.
-- "High": The channel frequently covers this niche alongside closely related topics.
-- "Medium": Broadly related, adjacent, or a multi-topic channel that partially covers the niche.
-- "Low": Definite false positive from an entirely different industry (e.g. watch repair or car repair when niche is home maintenance; or video games when niche is cooking).
+- "Very High": The channel's audience and content directly match the ideal buyers/niche.
+- "High": The channel frequently covers closely related topics that attract the right buyers.
+- "Medium": Broadly related or multi-topic channel with partial audience overlap.
+- "Low": Definite false positive from an entirely different industry.
 
-Return valid JSON with an "evaluations" object mapping channel ID to match level.
-Format:
+Return valid JSON with an "evaluations" object mapping channel ID to match level:
 {
   "evaluations": {
     "CHANNEL_ID": { "match": "Very High" | "High" | "Medium" | "Low" }
   }
 }`;
 
-    // Compact representation to conserve tokens and speed up inference
     const candidateList = channels.map(c => ({
       id: c.id,
       name: c.name,
@@ -700,7 +736,11 @@ Format:
       recentVideo: c.recentVideo ? c.recentVideo.title : ""
     }));
 
-    const userPrompt = `Target Niche: ${niche}\nTarget Audience: ${targetAudience || "General"}\n\nChannels to evaluate:\n${JSON.stringify(candidateList, null, 2)}`;
+    const contextHeader = hasProduct
+      ? `Product to Promote: ${productContext.name} (${productContext.category || 'Product/Service'})\nProduct Description: ${productContext.description || ''}\nIdeal Buyers: ${productContext.buyerPersona || targetAudience || ''}`
+      : `Target Niche: ${niche}\nTarget Audience: ${targetAudience || "General"}`;
+
+    const userPrompt = `${contextHeader}\n\nChannels to evaluate:\n${JSON.stringify(candidateList, null, 2)}`;
 
     const response = await openai.chat.completions.create({
       model: "gpt-5.4-mini",
