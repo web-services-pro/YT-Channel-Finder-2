@@ -6,6 +6,7 @@ import { fileURLToPath } from "url";
 import { generatePersonalizedOutreach } from "./api/generatePersonalizedOutreach.js";
 import { ApifyClient } from 'apify-client';
 import OpenAI from "openai";
+import { createClient } from "@supabase/supabase-js";
 
 // Dynamic imports for puppeteer to handle cloud deployment issues
 let puppeteer;
@@ -53,8 +54,15 @@ function getNextApifyToken() {
   return APIFY_API_TOKENS[currentApifyTokenIndex];
 }
 
+const SUPABASE_URL = process.env.SUPABASE_URL || '';
+const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY || process.env.SUPABASE_ANON_KEY || '';
+const supabase = (SUPABASE_URL && SUPABASE_KEY)
+  ? createClient(SUPABASE_URL, SUPABASE_KEY)
+  : null;
+
 console.log(`✅ YouTube API Keys loaded: ${YOUTUBE_API_KEYS.length} keys`);
 console.log(`✅ OpenAI API Key loaded: ${!!OPENAI_API_KEY}`);
+console.log(`✅ Supabase Cloud Sync configured: ${!!supabase}`);
 
 const app = express();
 
@@ -939,6 +947,228 @@ app.post("/api/channel-lookalikes", async (req, res) => {
   } catch (err) {
     console.error("❌ Lookalike finder failed:", err.message);
     res.status(500).json({ success: false, error: err.message, channels: [] });
+  }
+});
+
+// --- Supabase Cross-Device Sync Endpoints ---
+app.get("/api/supabase-status", (req, res) => {
+  res.json({
+    supabaseAvailable: !!supabase
+  });
+});
+
+// Get all saved creators from Supabase
+app.get("/api/saved-creators", async (req, res) => {
+  if (!supabase) {
+    return res.status(503).json({ success: false, error: "Supabase not configured", creators: [] });
+  }
+
+  try {
+    const { data, error } = await supabase
+      .from("saved_creators")
+      .select("*")
+      .order("created_at", { ascending: false });
+
+    if (error) throw error;
+
+    // Reconstruct full creator objects from full_data + top-level columns
+    const creators = (data || []).map(row => ({
+      ...(row.full_data || {}),
+      id: row.channel_id,
+      name: row.channel_name,
+      url: row.channel_url,
+      subscribers: Number(row.subscribers || 0),
+      engagementRate: Number(row.engagement_rate || 0),
+      audienceMatch: row.audience_match || "Medium",
+      email: row.email || "",
+      emailAvailable: !!(row.email && row.email.length > 0),
+      promotedProduct: row.promoted_product || "General Outreach",
+      monetization: row.monetization || "Unknown",
+      monetizationPotential: row.monetization_potential || "",
+      aiSubjectLine: row.ai_subject_line || "",
+      aiFirstLine: row.ai_first_line || "",
+      sequence: Array.isArray(row.sequence) ? row.sequence : [],
+      savedAt: row.created_at
+    }));
+
+    res.json({ success: true, creators });
+  } catch (err) {
+    console.error("❌ Supabase fetch saved creators failed:", err.message);
+    res.status(500).json({ success: false, error: err.message, creators: [] });
+  }
+});
+
+// Save or upsert a creator (or batch of creators) into Supabase
+app.post("/api/saved-creators", async (req, res) => {
+  if (!supabase) {
+    return res.status(503).json({ success: false, error: "Supabase not configured" });
+  }
+
+  try {
+    const incoming = Array.isArray(req.body.creators)
+      ? req.body.creators
+      : (req.body.creator ? [req.body.creator] : []);
+
+    if (incoming.length === 0) {
+      return res.status(400).json({ success: false, error: "No creator data provided" });
+    }
+
+    const records = incoming.map(ch => ({
+      channel_id: ch.id || ch.url,
+      channel_name: ch.name || "Unknown Channel",
+      channel_url: ch.url || "",
+      subscribers: parseInt(ch.subscribers) || 0,
+      engagement_rate: parseFloat(ch.engagementRate) || 0,
+      audience_match: ch.audienceMatch || "Medium",
+      email: ch.email || "",
+      promoted_product: ch.promotedProduct || "General Outreach",
+      monetization: ch.monetization || "Unknown",
+      monetization_potential: ch.monetizationPotential || "",
+      ai_subject_line: ch.aiSubjectLine || ch.email1Subject || "",
+      ai_first_line: ch.aiFirstLine || ch.email1Body || "",
+      sequence: Array.isArray(ch.sequence) ? ch.sequence : [],
+      full_data: ch
+    }));
+
+    const { error } = await supabase
+      .from("saved_creators")
+      .upsert(records, { onConflict: "channel_id" });
+
+    if (error) throw error;
+
+    console.log(`☁️ Synced ${records.length} creator(s) to Supabase`);
+    res.json({ success: true, count: records.length });
+  } catch (err) {
+    console.error("❌ Supabase save creator failed:", err.message);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// Remove a saved creator from Supabase
+app.delete("/api/saved-creators", async (req, res) => {
+  if (!supabase) {
+    return res.status(503).json({ success: false, error: "Supabase not configured" });
+  }
+
+  const { channelId, channelUrl } = req.body;
+  const targetKey = channelId || channelUrl;
+
+  if (!targetKey) {
+    return res.status(400).json({ success: false, error: "Missing channelId or channelUrl" });
+  }
+
+  try {
+    const { error } = await supabase
+      .from("saved_creators")
+      .delete()
+      .or(`channel_id.eq.${targetKey},channel_url.eq.${targetKey}`);
+
+    if (error) throw error;
+
+    console.log(`🗑️ Deleted creator ${targetKey} from Supabase`);
+    res.json({ success: true });
+  } catch (err) {
+    console.error("❌ Supabase delete creator failed:", err.message);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// Get all saved product/service offers from Supabase
+app.get("/api/saved-products", async (req, res) => {
+  if (!supabase) {
+    return res.status(503).json({ success: false, error: "Supabase not configured", products: [] });
+  }
+
+  try {
+    const { data, error } = await supabase
+      .from("saved_products")
+      .select("*")
+      .order("created_at", { ascending: false });
+
+    if (error) throw error;
+
+    const products = (data || []).map(row => ({
+      name: row.name,
+      category: row.category || "",
+      price: row.price || "",
+      dealType: row.deal_type || "",
+      commissionOrBudget: row.commission_or_budget || "",
+      targetNiches: row.target_niches || "",
+      description: row.description || "",
+      buyerPersona: row.buyer_persona || ""
+    }));
+
+    res.json({ success: true, products });
+  } catch (err) {
+    console.error("❌ Supabase fetch saved products failed:", err.message);
+    res.status(500).json({ success: false, error: err.message, products: [] });
+  }
+});
+
+// Save or upsert a product/service offer in Supabase
+app.post("/api/saved-products", async (req, res) => {
+  if (!supabase) {
+    return res.status(503).json({ success: false, error: "Supabase not configured" });
+  }
+
+  try {
+    const incoming = Array.isArray(req.body.products)
+      ? req.body.products
+      : (req.body.product ? [req.body.product] : []);
+
+    if (incoming.length === 0) {
+      return res.status(400).json({ success: false, error: "No product data provided" });
+    }
+
+    const records = incoming.map(p => ({
+      name: p.name,
+      category: p.category || "",
+      price: p.price || "",
+      deal_type: p.dealType || "",
+      commission_or_budget: p.commissionOrBudget || "",
+      target_niches: p.targetNiches || "",
+      description: p.description || "",
+      buyer_persona: p.buyerPersona || ""
+    }));
+
+    const { error } = await supabase
+      .from("saved_products")
+      .upsert(records, { onConflict: "name" });
+
+    if (error) throw error;
+
+    console.log(`☁️ Synced ${records.length} product offer(s) to Supabase`);
+    res.json({ success: true });
+  } catch (err) {
+    console.error("❌ Supabase save product failed:", err.message);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// Delete a saved product/service offer from Supabase
+app.delete("/api/saved-products", async (req, res) => {
+  if (!supabase) {
+    return res.status(503).json({ success: false, error: "Supabase not configured" });
+  }
+
+  const { name } = req.body;
+  if (!name) {
+    return res.status(400).json({ success: false, error: "Missing product name" });
+  }
+
+  try {
+    const { error } = await supabase
+      .from("saved_products")
+      .delete()
+      .eq("name", name);
+
+    if (error) throw error;
+
+    console.log(`🗑️ Deleted product offer "${name}" from Supabase`);
+    res.json({ success: true });
+  } catch (err) {
+    console.error("❌ Supabase delete product failed:", err.message);
+    res.status(500).json({ success: false, error: err.message });
   }
 });
 
