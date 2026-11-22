@@ -339,51 +339,186 @@
 </head>
 <body>
     <div class="container">
-        <div class="header">
+        <div class="header" style="padding-bottom: 25px;">
             <h1>🎯 YouTube Channel Finder</h1>
-            <p>Discover the perfect YouTube channels for your niche with advanced filtering and engagement analysis and AI Analysis</p>
+            <p>Discover creators, match your digital products or services to ideal buyers, and manage saved partnerships</p>
+            
+            <!-- Top Workspace Navigation Tabs -->
+            <div style="display: flex; justify-content: center; gap: 12px; margin-top: 22px; flex-wrap: wrap;">
+                <button type="button" id="navDiscoverBtn" onclick="window.finderApp.switchMainTab('discover')"
+                    style="padding: 10px 24px; border-radius: 30px; border: 2px solid white; background: white; color: #ee5a24; font-weight: 700; font-size: 0.95rem; cursor: pointer; box-shadow: 0 4px 12px rgba(0,0,0,0.15);">
+                    🔍 Discover Creators
+                </button>
+                <button type="button" id="navSavedBtn" onclick="window.finderApp.switchMainTab('saved')"
+                    style="padding: 10px 24px; border-radius: 30px; border: 2px solid rgba(255,255,255,0.8); background: rgba(255,255,255,0.15); color: white; font-weight: 700; font-size: 0.95rem; cursor: pointer;">
+                    🔖 Saved Creators (<span id="savedCountBadge">0</span>)
+                </button>
+            </div>
         </div>
 
-        <div class="form-section">
-            <form id="searchForm">
-                <div class="form-grid">
-                    <div class="form-group">
-                        <label for="niche">Niche *</label>
-                        <input type="text" id="niche" placeholder="e.g., fitness, digital marketing, cooking" required>
+        <!-- DISCOVER WORKSPACE -->
+        <div id="discoverWorkspace">
+            <div class="form-section">
+                <!-- Search Mode Toggle: General Search vs Product / Service Search -->
+                <div style="display: flex; justify-content: center; margin-bottom: 28px;">
+                    <div style="display: inline-flex; background: #e2e8f0; padding: 5px; border-radius: 14px; gap: 6px;">
+                        <button type="button" id="modeGeneralBtn" onclick="window.finderApp.setSearchMode('general')"
+                            style="padding: 10px 22px; border-radius: 10px; border: none; background: white; color: #2d3748; font-weight: 700; font-size: 0.9rem; cursor: pointer; box-shadow: 0 2px 6px rgba(0,0,0,0.08);">
+                            🧭 General Niche Search
+                        </button>
+                        <button type="button" id="modeProductBtn" onclick="window.finderApp.setSearchMode('product')"
+                            style="padding: 10px 22px; border-radius: 10px; border: none; background: transparent; color: #4a5568; font-weight: 600; font-size: 0.9rem; cursor: pointer;">
+                            📦 Product / Service Partnership Search
+                        </button>
                     </div>
-                    
-                    <div class="form-group">
-                        <label for="targetAudience">Target Audience *</label>
-                        <textarea id="targetAudience" placeholder="e.g., people who want to improve their health and fitness" required></textarea>
+                </div>
+
+                <form id="searchForm">
+                    <!-- MODE A: GENERAL SEARCH FIELDS -->
+                    <div id="generalSearchFields" class="form-grid" style="margin-bottom: 20px;">
+                        <div class="form-group">
+                            <label for="niche">Niche *</label>
+                            <input type="text" id="niche" placeholder="e.g., home repairs and maintenance, SaaS marketing, fitness">
+                        </div>
+                        
+                        <div class="form-group">
+                            <label for="targetAudience">Target Audience *</label>
+                            <textarea id="targetAudience" placeholder="e.g., homeowners who want to maintain their homes"></textarea>
+                        </div>
                     </div>
-                    
-                    <div class="form-group">
-                        <label>Subscriber Count Range</label>
-                        <div class="range-group">
-                            <input type="number" id="minSubscribers" placeholder="Min (25,000)" value="25000">
-                            <input type="number" id="maxSubscribers" placeholder="Max (1,000,000)" value="1000000">
+
+                    <!-- MODE B: PRODUCT / SERVICE CONTEXT FIELDS -->
+                    <div id="productSearchFields" style="display: none; background: white; border: 2px solid #cbd5e0; border-radius: 14px; padding: 24px; margin-bottom: 25px; box-shadow: 0 4px 12px rgba(0,0,0,0.04);">
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 18px; flex-wrap: wrap; gap: 10px; border-bottom: 1px solid #edf2f7; padding-bottom: 14px;">
+                            <div>
+                                <h3 style="margin: 0; color: #2d3748; font-size: 1.15rem;">📦 Your Product or Service Offer</h3>
+                                <span style="font-size: 0.85rem; color: #718096;">AI will match creators whose viewers are ideal buyers and tailor your 6-email pitch around this offer.</span>
+                            </div>
+                            <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
+                                <select id="savedProductSelect" onchange="window.finderApp.loadSavedProduct(this.value)"
+                                    style="padding: 8px 12px; border: 1px solid #cbd5e0; border-radius: 8px; font-size: 0.85rem; background: #f8fafc; color: #2d3748;">
+                                    <option value="">-- Saved Products / Services --</option>
+                                </select>
+                                <button type="button" onclick="window.finderApp.saveCurrentProduct()"
+                                    style="padding: 8px 14px; background: #48bb78; color: white; border: none; border-radius: 8px; font-size: 0.85rem; font-weight: 600; cursor: pointer;">
+                                    💾 Save Offer
+                                </button>
+                                <button type="button" onclick="window.finderApp.deleteSelectedProduct()"
+                                    style="padding: 8px 10px; background: #fed7d7; color: #c53030; border: none; border-radius: 8px; font-size: 0.85rem; font-weight: 600; cursor: pointer;" title="Delete saved offer">
+                                    🗑️
+                                </button>
+                            </div>
+                        </div>
+
+                        <div class="form-grid" style="margin-bottom: 15px;">
+                            <div class="form-group">
+                                <label for="productName">Product / Service Name *</label>
+                                <input type="text" id="productName" placeholder="e.g., Sleep Better Course, Local SEO Growth Service">
+                            </div>
+
+                            <div class="form-group">
+                                <label for="productCategory">Category</label>
+                                <select id="productCategory" style="padding: 12px 16px; border: 2px solid #e1e5eb; border-radius: 10px; font-size: 1rem; background: white;">
+                                    <option value="Digital Product (Course / eBook / Templates)">Digital Product (Course / eBook / Templates)</option>
+                                    <option value="SaaS / Software Tool">SaaS / Software Tool</option>
+                                    <option value="Agency / Service (Marketing / SEO / Consulting)">Agency / Service (Marketing / SEO / Consulting)</option>
+                                    <option value="Paid Community / Membership">Paid Community / Membership</option>
+                                    <option value="Physical Product / Gear">Physical Product / Gear</option>
+                                </select>
+                            </div>
+
+                            <div class="form-group">
+                                <label for="productPrice">Price ($)</label>
+                                <input type="text" id="productPrice" placeholder="e.g., 49 or 299/mo">
+                            </div>
+
+                            <div class="form-group">
+                                <label for="productDealType">Partnership / Deal Structure</label>
+                                <select id="productDealType" style="padding: 12px 16px; border: 2px solid #e1e5eb; border-radius: 10px; font-size: 1rem; background: white;">
+                                    <option value="Affiliate Commission (% Revenue Share)">Affiliate Commission (% Revenue Share)</option>
+                                    <option value="Joint Venture (50/50 Co-Promotion)">Joint Venture (50/50 Co-Promotion)</option>
+                                    <option value="Paid Sponsorship / Flat Fee">Paid Sponsorship / Flat Fee</option>
+                                    <option value="Hybrid (Upfront Fee + Commission)">Hybrid (Upfront Fee + Commission)</option>
+                                </select>
+                            </div>
+
+                            <div class="form-group">
+                                <label for="productCommission">Commission (%) or Budget ($)</label>
+                                <input type="text" id="productCommission" placeholder="e.g., 40% commission or $500 budget">
+                            </div>
+
+                            <div class="form-group">
+                                <label for="productTargetNiches">Creator Niches to Target (Optional)</label>
+                                <input type="text" id="productTargetNiches" placeholder="Leave blank to let AI auto-suggest best niches">
+                            </div>
+                        </div>
+
+                        <div class="form-grid" style="margin-bottom: 0;">
+                            <div class="form-group">
+                                <label for="productDescription">What It Is (Short plain description of what you sell) *</label>
+                                <textarea id="productDescription" placeholder="e.g., A step-by-step video course and checklist helping homeowners prevent costly plumbing and HVAC repairs."></textarea>
+                            </div>
+
+                            <div class="form-group">
+                                <label for="productBuyerPersona">Who Buys It (Ideal customer & core pain point) *</label>
+                                <textarea id="productBuyerPersona" placeholder="e.g., First-time homeowners who struggle with expensive contractor bills and want simple DIY maintenance guides."></textarea>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- SHARED FILTERS (Subscribers, Engagement, Count) -->
+                    <div class="form-grid">
+                        <div class="form-group">
+                            <label>Subscriber Count Range</label>
+                            <div class="range-group">
+                                <input type="number" id="minSubscribers" placeholder="Min (25,000)" value="25000">
+                                <input type="number" id="maxSubscribers" placeholder="Max (1,000,000)" value="1000000">
+                            </div>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label for="minEngagement">Minimum Engagement Rate (%)</label>
+                            <input type="number" id="minEngagement" placeholder="2" value="2" step="0.1">
+                        </div>
+                        
+                        <div class="form-group">
+                            <label for="channelCount">Number of Channels to Find</label>
+                            <input type="number" id="channelCount" placeholder="25" value="25" min="1" max="100">
                         </div>
                     </div>
                     
-                    <div class="form-group">
-                        <label for="minEngagement">Minimum Engagement Rate (%)</label>
-                        <input type="number" id="minEngagement" placeholder="2" value="2" step="0.1">
+                    <div style="text-align: center;">
+                        <button type="submit" class="search-btn" id="searchBtn">
+                            🚀 Start Channel Discovery
+                        </button>
                     </div>
-                    
-                    <div class="form-group">
-                        <label for="channelCount">Number of Channels to Find</label>
-                        <input type="number" id="channelCount" placeholder="25" value="25" min="1" max="100">
-                    </div>
-                </div>
-                
-                <div style="text-align: center;">
-                    <button type="submit" class="search-btn" id="searchBtn">
-                        🚀 Start Channel Discovery
-                    </button>
-                </div>
-            </form>
+                </form>
+            </div>
         </div>
 
+        <!-- SAVED CREATORS WORKSPACE -->
+        <div id="savedWorkspace" style="display: none; padding: 40px; background: #f8fafc; min-height: 450px;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 25px; flex-wrap: wrap; gap: 15px;">
+                <div>
+                    <h2 style="margin: 0; color: #1a202c; font-size: 1.6rem;">Saved Creators</h2>
+                    <p style="margin: 4px 0 0 0; color: #718096; font-size: 0.95rem;">The creators you're targeting for partnerships, with emails & sequences saved.</p>
+                </div>
+                <div style="display: flex; gap: 10px; flex-wrap: wrap;">
+                    <button type="button" onclick="window.finderApp.downloadSavedCSV()" class="download-btn">
+                        📥 Export Saved CSV
+                    </button>
+                    <button type="button" onclick="window.finderApp.switchMainTab('discover')"
+                        style="padding: 12px 20px; border-radius: 25px; border: 1px solid #cbd5e0; background: white; color: #2d3748; font-weight: 600; cursor: pointer;">
+                        ← Back to Search
+                    </button>
+                </div>
+            </div>
+
+            <div id="savedCreatorsGrid" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 20px;">
+                <!-- Saved Creator Cards rendered here -->
+            </div>
+        </div>
+        
         <div class="progress-section" id="progressSection">
             <div class="progress-container">
                 <div class="progress-bar" id="progressBar"></div>
@@ -902,11 +1037,18 @@
             }
 
             init() {
+                this.searchMode = 'general';
+                this.activeProductContext = null;
+                this.savedCreators = JSON.parse(localStorage.getItem('yt_saved_creators') || '[]');
+                this.savedProducts = JSON.parse(localStorage.getItem('yt_saved_products') || '[]');
+
                 // Check API keys availability
                 this.checkApiKeys();
-
-                // NEW: Check Apify availability
                 this.checkApifyStatus();
+
+                // Populate saved products & saved creators UI
+                this.refreshSavedProductsDropdown();
+                this.updateSavedCountBadge();
     
                 // Event listeners
                 document.getElementById('searchForm').addEventListener('submit', (e) => {
@@ -921,6 +1063,147 @@
                 document.getElementById('newSearchBtn').addEventListener('click', () => {
                     this.resetSearch();
                 });
+            }
+
+            switchMainTab(tab) {
+                const discoverWorkspace = document.getElementById('discoverWorkspace');
+                const savedWorkspace = document.getElementById('savedWorkspace');
+                const progressSection = document.getElementById('progressSection');
+                const resultsSection = document.getElementById('resultsSection');
+                const navDiscoverBtn = document.getElementById('navDiscoverBtn');
+                const navSavedBtn = document.getElementById('navSavedBtn');
+
+                if (tab === 'saved') {
+                    discoverWorkspace.style.display = 'none';
+                    progressSection.style.display = 'none';
+                    resultsSection.style.display = 'none';
+                    savedWorkspace.style.display = 'block';
+
+                    navSavedBtn.style.background = 'white';
+                    navSavedBtn.style.color = '#ee5a24';
+                    navDiscoverBtn.style.background = 'rgba(255,255,255,0.15)';
+                    navDiscoverBtn.style.color = 'white';
+
+                    this.renderSavedCreators();
+                } else {
+                    savedWorkspace.style.display = 'none';
+                    discoverWorkspace.style.display = 'block';
+                    if (this.foundChannels.length > 0) {
+                        resultsSection.style.display = 'block';
+                    }
+
+                    navDiscoverBtn.style.background = 'white';
+                    navDiscoverBtn.style.color = '#ee5a24';
+                    navSavedBtn.style.background = 'rgba(255,255,255,0.15)';
+                    navSavedBtn.style.color = 'white';
+                }
+            }
+
+            setSearchMode(mode) {
+                this.searchMode = mode;
+                const generalFields = document.getElementById('generalSearchFields');
+                const productFields = document.getElementById('productSearchFields');
+                const modeGeneralBtn = document.getElementById('modeGeneralBtn');
+                const modeProductBtn = document.getElementById('modeProductBtn');
+                const searchBtn = document.getElementById('searchBtn');
+
+                if (mode === 'product') {
+                    generalFields.style.display = 'none';
+                    productFields.style.display = 'block';
+                    modeProductBtn.style.background = 'white';
+                    modeProductBtn.style.color = '#2d3748';
+                    modeProductBtn.style.fontWeight = '700';
+                    modeProductBtn.style.boxShadow = '0 2px 6px rgba(0,0,0,0.08)';
+                    modeGeneralBtn.style.background = 'transparent';
+                    modeGeneralBtn.style.color = '#4a5568';
+                    modeGeneralBtn.style.boxShadow = 'none';
+                    searchBtn.textContent = '🚀 Find Creators For My Product / Service';
+                } else {
+                    productFields.style.display = 'none';
+                    generalFields.style.display = 'grid';
+                    modeGeneralBtn.style.background = 'white';
+                    modeGeneralBtn.style.color = '#2d3748';
+                    modeGeneralBtn.style.fontWeight = '700';
+                    modeGeneralBtn.style.boxShadow = '0 2px 6px rgba(0,0,0,0.08)';
+                    modeProductBtn.style.background = 'transparent';
+                    modeProductBtn.style.color = '#4a5568';
+                    modeProductBtn.style.boxShadow = 'none';
+                    searchBtn.textContent = '🚀 Start Channel Discovery';
+                }
+            }
+
+            refreshSavedProductsDropdown() {
+                const select = document.getElementById('savedProductSelect');
+                if (!select) return;
+                select.innerHTML = '<option value="">-- Saved Products / Services (' + this.savedProducts.length + ') --</option>';
+                this.savedProducts.forEach((p, idx) => {
+                    const opt = document.createElement('option');
+                    opt.value = idx;
+                    opt.textContent = `${p.name} (${p.price ? '$' + p.price : p.category})`;
+                    select.appendChild(opt);
+                });
+            }
+
+            saveCurrentProduct() {
+                const name = document.getElementById('productName').value.trim();
+                const description = document.getElementById('productDescription').value.trim();
+                if (!name) {
+                    alert("Please enter a Product / Service Name first.");
+                    return;
+                }
+                const productObj = {
+                    name,
+                    category: document.getElementById('productCategory').value,
+                    price: document.getElementById('productPrice').value.trim(),
+                    dealType: document.getElementById('productDealType').value,
+                    commissionOrBudget: document.getElementById('productCommission').value.trim(),
+                    targetNiches: document.getElementById('productTargetNiches').value.trim(),
+                    description,
+                    buyerPersona: document.getElementById('productBuyerPersona').value.trim()
+                };
+
+                const existingIdx = this.savedProducts.findIndex(p => p.name.toLowerCase() === name.toLowerCase());
+                if (existingIdx >= 0) {
+                    this.savedProducts[existingIdx] = productObj;
+                } else {
+                    this.savedProducts.push(productObj);
+                }
+
+                localStorage.setItem('yt_saved_products', JSON.stringify(this.savedProducts));
+                this.refreshSavedProductsDropdown();
+                alert(`✅ Saved "${name}" to your Product/Service Profiles!`);
+            }
+
+            loadSavedProduct(indexStr) {
+                if (indexStr === '') return;
+                const p = this.savedProducts[parseInt(indexStr)];
+                if (!p) return;
+                document.getElementById('productName').value = p.name || '';
+                document.getElementById('productCategory').value = p.category || 'Digital Product (Course / eBook / Templates)';
+                document.getElementById('productPrice').value = p.price || '';
+                document.getElementById('productDealType').value = p.dealType || 'Affiliate Commission (% Revenue Share)';
+                document.getElementById('productCommission').value = p.commissionOrBudget || '';
+                document.getElementById('productTargetNiches').value = p.targetNiches || '';
+                document.getElementById('productDescription').value = p.description || '';
+                document.getElementById('productBuyerPersona').value = p.buyerPersona || '';
+            }
+
+            deleteSelectedProduct() {
+                const select = document.getElementById('savedProductSelect');
+                if (!select || select.value === '') {
+                    alert("Select a saved product from the dropdown to delete.");
+                    return;
+                }
+                const idx = parseInt(select.value);
+                const removed = this.savedProducts.splice(idx, 1);
+                localStorage.setItem('yt_saved_products', JSON.stringify(this.savedProducts));
+                this.refreshSavedProductsDropdown();
+                alert(`🗑️ Removed "${removed[0]?.name}"`);
+            }
+
+            updateSavedCountBadge() {
+                const badge = document.getElementById('savedCountBadge');
+                if (badge) badge.textContent = this.savedCreators.length;
             }
 
             async checkApiKeys() {
@@ -948,7 +1231,6 @@
                     this.apifyAvailable = data.apifyAvailable;
                     this.apifyTokensCount = data.apifyTokensCount || 0;
                     console.log(`✅ Apify available: ${this.apifyAvailable} (${this.apifyTokensCount} tokens)`);
-                    console.log(`✅ Apify available: ${this.apifyAvailable}`);
                 } catch (error) {
                     console.warn('Failed to check Apify status:', error.message);
                     this.apifyAvailable = false;
@@ -957,15 +1239,31 @@
             
             async startSearch() {
                 if (this.isSearching) return;
-    
+
+                const formData = this.getFormData();
+
+                if (formData.searchMode === 'product') {
+                    if (!formData.productContext.name) {
+                        this.showError('Please enter your Product or Service Name.');
+                        return;
+                    }
+                    if (!formData.productContext.description && !formData.productContext.buyerPersona) {
+                        this.showError('Please describe what your product/service is or who buys it.');
+                        return;
+                    }
+                } else {
+                    if (!formData.niche) {
+                        this.showError('Please enter a Niche to search.');
+                        return;
+                    }
+                }
+
+                document.getElementById('errorContainer').innerHTML = '';
                 this.isSearching = true;
                 this.searchId = Date.now().toString();
                 this.foundChannels = [];
-    
-                // Get form data (no API keys needed from form)
-                const formData = this.getFormData();
+                this.activeProductContext = formData.productContext;
   
-                // Show progress section
                 document.getElementById('progressSection').style.display = 'block';
                 document.getElementById('resultsSection').style.display = 'none';
                 document.getElementById('searchBtn').disabled = true;
@@ -981,9 +1279,27 @@
             }
             
             getFormData() {
+                const isProduct = this.searchMode === 'product';
+                const productContext = isProduct ? {
+                    name: document.getElementById('productName').value.trim(),
+                    category: document.getElementById('productCategory').value,
+                    price: document.getElementById('productPrice').value.trim(),
+                    dealType: document.getElementById('productDealType').value,
+                    commissionOrBudget: document.getElementById('productCommission').value.trim(),
+                    targetNiches: document.getElementById('productTargetNiches').value.trim(),
+                    description: document.getElementById('productDescription').value.trim(),
+                    buyerPersona: document.getElementById('productBuyerPersona').value.trim()
+                } : null;
+
                 return {
-                    niche: document.getElementById('niche').value.trim(),
-                    targetAudience: document.getElementById('targetAudience').value.trim(),
+                    searchMode: this.searchMode,
+                    productContext,
+                    niche: isProduct
+                        ? (productContext.targetNiches || productContext.name)
+                        : document.getElementById('niche').value.trim(),
+                    targetAudience: isProduct
+                        ? productContext.buyerPersona
+                        : document.getElementById('targetAudience').value.trim(),
                     minSubscribers: parseInt(document.getElementById('minSubscribers').value) || 25000,
                     maxSubscribers: parseInt(document.getElementById('maxSubscribers').value) || 1000000,
                     minEngagement: parseFloat(document.getElementById('minEngagement').value) || 2,
@@ -993,8 +1309,10 @@
             
             async performSearch(formData) {
                 // Step 1: Generate search queries (5%)
-                this.updateProgress(5, 'Generating AI search queries...');
-                const queries = await this.generateSearchQueries(formData.niche, formData.targetAudience);
+                this.updateProgress(5, formData.searchMode === 'product'
+                    ? `AI inferring buyer niches & queries for "${formData.productContext.name}"...`
+                    : 'Generating AI search queries...');
+                const queries = await this.generateSearchQueries(formData.niche, formData.targetAudience, formData.productContext);
     
                 // Step 2: Discover channels (10-30%)
                 this.updateProgress(10, 'Discovering channels...');
@@ -1013,15 +1331,21 @@
                 const prioritizedCandidates = contactChannels.slice(0, targetPoolSize);
 
                 // Step 6: Get recent videos using 100x cheaper Playlist API (60-75%)
-                this.updateProgress(60, 'Fetching recent videos...');
+                this.updateProgress(60, 'Fetching recent videos & generating outreach sequences...');
                 const channelsWithVideos = await this.getRecentVideos(prioritizedCandidates);
     
-                // Step 7: Analyze audience match with AI (75-85%)
-                this.updateProgress(75, 'Analyzing audience match with AI...');
-                let matchedChannels = await this.analyzeAudienceMatch(channelsWithVideos, formData.niche, formData.targetAudience);
-                
+                // Step 7: Analyze audience / buyer match with AI (75-85%)
+                this.updateProgress(75, 'Analyzing buyer-audience fit with AI...');
+                let matchedChannels = await this.analyzeAudienceMatch(channelsWithVideos, formData.niche, formData.targetAudience, formData.productContext);
+    
                 // Select final requested channel count
                 let finalChannels = matchedChannels.slice(0, formData.channelCount);
+
+                // Tag each channel with the active product context if in Product mode
+                finalChannels.forEach(ch => {
+                    ch.promotedProduct = formData.productContext ? formData.productContext.name : 'General Outreach';
+                    ch.productContext = formData.productContext || null;
+                });
 
                 // Step 8: Bulk email extraction with Apify ONLY for top channels missing an email (85-95%)
                 if (this.apifyAvailable) {
@@ -1039,18 +1363,21 @@
                     this.showResults();
                 }, 500);
             }
-            
-            async generateSearchQueries(niche, targetAudience) {
+
+            async generateSearchQueries(niche, targetAudience, productContext = null) {
                 try {
                     const response = await fetch('/api/generate-queries', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ niche, targetAudience })
+                        body: JSON.stringify({ niche, targetAudience, productContext })
                     });
                     if (response.ok) {
                         const data = await response.json();
                         if (data.success && Array.isArray(data.queries) && data.queries.length > 0) {
                             console.log('🤖 AI generated queries:', data.queries);
+                            if (data.inferredNiches && data.inferredNiches.length > 0) {
+                                console.log('🎯 AI inferred target niches:', data.inferredNiches);
+                            }
                             return data.queries;
                         }
                     }
@@ -1058,42 +1385,38 @@
                     console.warn('AI Query Generation API failed, using smart dynamic generator:', err.message);
                 }
 
-                // Smart Niche-Aware Fallback Generator
                 return this.generateSmartFallbackQueries(niche, targetAudience);
             }
 
             generateSmartFallbackQueries(niche, targetAudience) {
-                const cleanNiche = niche.trim().toLowerCase();
+                const cleanNiche = (niche || '').trim().toLowerCase();
                 const cleanAudience = targetAudience ? targetAudience.trim().toLowerCase() : '';
 
-                // Extract key words from audience without generic stopwords
                 const stopwords = new Set(['people', 'who', 'want', 'to', 'how', 'learn', 'and', 'for', 'the', 'a', 'an', 'in', 'of', 'with', 'on', 'their', 'best', 'get', 'more']);
                 const audienceWords = cleanAudience
                     .replace(/[^a-z0-9\s]/g, '')
                     .split(/\s+/)
                     .filter(w => w.length > 2 && !stopwords.has(w));
 
-                const baseQueries = [
+                const baseQueries = cleanNiche ? [
                     cleanNiche,
                     `${cleanNiche} channel`,
                     `${cleanNiche} tutorial`,
                     `${cleanNiche} tips`,
                     `${cleanNiche} guide`,
                     `${cleanNiche} review`,
-                    `${cleanNiche} explained`,
-                    `${cleanNiche} 101`,
-                    `best ${cleanNiche}`
-                ];
+                    `${cleanNiche} explained`
+                ] : [];
 
-                // Dynamically append relevant audience terms
-                audienceWords.slice(0, 4).forEach(word => {
-                    baseQueries.push(`${cleanNiche} ${word}`);
-                    baseQueries.push(`${word} tutorial`);
+                audienceWords.slice(0, 5).forEach(word => {
+                    if (cleanNiche) baseQueries.push(`${cleanNiche} ${word}`);
+                    baseQueries.push(`${word} tips`);
+                    baseQueries.push(`${word} guide`);
                 });
 
                 return [...new Set(baseQueries)];
             }
-
+            
             async discoverChannels(queries, minSubs, maxSubs) {
                 const allChannels = new Map();
                 const progressStep = 40 / (queries.length || 1);
@@ -1710,10 +2033,11 @@
                             currentMonetization: channel.monetization || "Unknown",
                             monetizationPotential: channel.monetizationPotential || "",
                             subscribers: channel.subscribers || 0,
-                            engagementRate: parseFloat((channel.engagementRate || 0).toFixed(2))
+                            engagementRate: parseFloat((channel.engagementRate || 0).toFixed(2)),
+                            productContext: this.activeProductContext || null
                         })
                     });
-
+                    
                     if (!outreachResp.ok) {
                         const errorText = await outreachResp.text();
                         throw new Error(`API returned ${outreachResp.status}: ${errorText}`);
@@ -1773,7 +2097,7 @@
                     : 0;
             }
             
-            async analyzeAudienceMatch(channels, niche, targetAudience) {
+            async analyzeAudienceMatch(channels, niche, targetAudience, productContext = null) {
                 if (!channels || channels.length === 0) return [];
 
                 try {
@@ -1784,6 +2108,7 @@
                         body: JSON.stringify({
                             niche,
                             targetAudience,
+                            productContext,
                             channels: channels.map(c => ({
                                 id: c.id,
                                 name: c.name,
@@ -1867,6 +2192,7 @@
                 this.foundChannels.forEach((channel, idx) => {
                     const row = document.createElement('tr');
                     row.id = `channel-row-${idx}`;
+                    const isSaved = this.savedCreators.some(s => (s.id && s.id === channel.id) || s.url === channel.url);
             
                     // Format recent video
                     let recentVideoHtml = 'No recent videos';
@@ -1916,9 +2242,15 @@
                             <a href="${channel.url}" target="_blank" class="channel-name">
                                 ${this.escapeHtml(channel.name)}
                             </a>
-                            <button onclick="window.finderApp.findLookalikes(${idx})" style="margin-top: 4px; display: inline-block; padding: 3px 6px; font-size: 0.7rem; background: #f0f2ff; border: 1px solid #667eea; color: #667eea; border-radius: 4px; cursor: pointer;">
-                                🔍 Lookalikes
-                            </button>
+                            <div style="display: flex; gap: 4px; margin-top: 6px; flex-wrap: wrap;">
+                                <button onclick="window.finderApp.toggleSaveCreator(${idx})" id="save-btn-${idx}"
+                                    style="padding: 3px 7px; font-size: 0.7rem; background: ${isSaved ? '#c6f6d5' : '#edf2f7'}; border: 1px solid ${isSaved ? '#48bb78' : '#cbd5e0'}; color: ${isSaved ? '#22543d' : '#2d3748'}; border-radius: 4px; cursor: pointer; font-weight: 600;">
+                                    ${isSaved ? '✅ Saved' : '🔖 Save'}
+                                </button>
+                                <button onclick="window.finderApp.findLookalikes(${idx})" style="padding: 3px 6px; font-size: 0.7rem; background: #f0f2ff; border: 1px solid #667eea; color: #667eea; border-radius: 4px; cursor: pointer;">
+                                    🔍 Lookalikes
+                                </button>
+                            </div>
                         </td>
                         <td class="subscriber-count">
                             ${this.formatNumber(channel.subscribers)}
@@ -2039,6 +2371,153 @@
                 });
             }
 
+            toggleSaveCreator(index) {
+                const channel = this.foundChannels[index];
+                if (!channel) return;
+
+                const existingIndex = this.savedCreators.findIndex(s => (s.id && s.id === channel.id) || s.url === channel.url);
+                const btn = document.getElementById(`save-btn-${index}`);
+
+                if (existingIndex >= 0) {
+                    this.savedCreators.splice(existingIndex, 1);
+                    if (btn) {
+                        btn.textContent = '🔖 Save';
+                        btn.style.background = '#edf2f7';
+                        btn.style.borderColor = '#cbd5e0';
+                        btn.style.color = '#2d3748';
+                    }
+                } else {
+                    const creatorRecord = {
+                        ...channel,
+                        savedAt: new Date().toISOString(),
+                        promotedProduct: channel.promotedProduct || (this.activeProductContext ? this.activeProductContext.name : 'General Outreach')
+                    };
+                    this.savedCreators.unshift(creatorRecord);
+                    if (btn) {
+                        btn.textContent = '✅ Saved';
+                        btn.style.background = '#c6f6d5';
+                        btn.style.borderColor = '#48bb78';
+                        btn.style.color = '#22543d';
+                    }
+                }
+
+                localStorage.setItem('yt_saved_creators', JSON.stringify(this.savedCreators));
+                this.updateSavedCountBadge();
+            }
+
+            renderSavedCreators() {
+                const grid = document.getElementById('savedCreatorsGrid');
+                if (!grid) return;
+
+                if (this.savedCreators.length === 0) {
+                    grid.innerHTML = `
+                        <div style="grid-column: 1 / -1; text-align: center; padding: 60px 20px; background: white; border-radius: 16px; border: 2px dashed #cbd5e0;">
+                            <div style="font-size: 2.5rem; margin-bottom: 10px;">🔖</div>
+                            <h3 style="color: #2d3748; margin-bottom: 6px;">No Saved Creators Yet</h3>
+                            <p style="color: #718096; font-size: 0.9rem; margin-bottom: 18px;">Run a search in Discover Creators and click "🔖 Save" on any channel you want to partner with.</p>
+                            <button type="button" onclick="window.finderApp.switchMainTab('discover')" class="search-btn" style="padding: 12px 26px; font-size: 0.95rem;">
+                                🔍 Discover Creators
+                            </button>
+                        </div>
+                    `;
+                    return;
+                }
+
+                grid.innerHTML = '';
+                this.savedCreators.forEach((ch, sIdx) => {
+                    const card = document.createElement('div');
+                    card.style.cssText = 'background: white; border-radius: 16px; padding: 22px; border: 1px solid #e2e8f0; box-shadow: 0 4px 12px rgba(0,0,0,0.04); display: flex; flex-direction: column; justify-content: space-between; gap: 14px;';
+
+                    const emailDisplay = ch.email
+                        ? `<div style="display:flex; justify-content:space-between; align-items:center; background:#f8fafc; padding:10px 12px; border-radius:10px; border:1px solid #edf2f7;">
+                               <span style="font-size:0.85rem; color:#2d3748; font-weight:500; overflow:hidden; text-overflow:ellipsis;">✉️ ${this.escapeHtml(ch.email)}</span>
+                               <button type="button" onclick="navigator.clipboard.writeText('${this.escapeHtml(ch.email)}'); this.textContent='Copied!'; setTimeout(()=>this.textContent='Copy',1500);"
+                                   style="padding:4px 10px; font-size:0.75rem; background:white; border:1px solid #cbd5e0; border-radius:6px; cursor:pointer; font-weight:600; color:#4a5568;">Copy</button>
+                           </div>`
+                        : `<div style="background:#fffaf0; padding:10px 12px; border-radius:10px; border:1px solid #feebc8; font-size:0.82rem; color:#c05621;">
+                               ⚠️ Email not yet unlocked
+                           </div>`;
+
+                    card.innerHTML = `
+                        <div>
+                            <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:10px; margin-bottom:10px;">
+                                <div>
+                                    <a href="${ch.url}" target="_blank" style="font-size:1.1rem; font-weight:700; color:#1a202c; text-decoration:none;">
+                                        ${this.escapeHtml(ch.name)} ↗
+                                    </a>
+                                    <div style="margin-top:4px;">
+                                        <span class="audience-match ${this.getMatchClass(ch.audienceMatch || 'High')}" style="font-size:0.75rem; padding:2px 10px;">
+                                            ${ch.audienceMatch || 'High'} Fit
+                                        </span>
+                                    </div>
+                                </div>
+                                <button type="button" onclick="window.finderApp.removeSavedCreator(${sIdx})" title="Remove saved creator"
+                                    style="background:transparent; border:none; color:#a0aec0; font-size:1.1rem; cursor:pointer; padding:4px;">
+                                    🗑️
+                                </button>
+                            </div>
+
+                            <div style="display:grid; grid-template-columns: 1fr 1fr; gap:10px; margin: 14px 0;">
+                                <div style="background:#f8fafc; padding:10px; border-radius:10px; text-align:center;">
+                                    <div style="font-size:0.7rem; color:#718096; font-weight:700; text-transform:uppercase;">Subscribers</div>
+                                    <div style="font-size:1.05rem; font-weight:700; color:#2d3748; margin-top:2px;">${this.formatNumber(ch.subscribers || 0)}</div>
+                                </div>
+                                <div style="background:#f8fafc; padding:10px; border-radius:10px; text-align:center;">
+                                    <div style="font-size:0.7rem; color:#718096; font-weight:700; text-transform:uppercase;">Engagement</div>
+                                    <div style="font-size:1.05rem; font-weight:700; color:#20bf6b; margin-top:2px;">${(ch.engagementRate || 0).toFixed(2)}%</div>
+                                </div>
+                            </div>
+
+                            ${emailDisplay}
+
+                            <div style="margin-top:12px; font-size:0.82rem; color:#4a5568; display:flex; align-items:center; gap:6px;">
+                                <span>📦</span>
+                                <span>Promoting: <strong>${this.escapeHtml(ch.promotedProduct || 'General Outreach')}</strong></span>
+                            </div>
+                        </div>
+
+                        <div style="margin-top:6px;">
+                            <button type="button" onclick="window.finderApp.viewSavedSequence(${sIdx})"
+                                style="width:100%; padding:11px; border-radius:10px; border:none; background:linear-gradient(135deg, #667eea, #764ba2); color:white; font-weight:700; font-size:0.9rem; cursor:pointer;">
+                                💬 View 6-Step Sequence
+                            </button>
+                        </div>
+                    `;
+                    grid.appendChild(card);
+                });
+            }
+
+            removeSavedCreator(savedIndex) {
+                this.savedCreators.splice(savedIndex, 1);
+                localStorage.setItem('yt_saved_creators', JSON.stringify(this.savedCreators));
+                this.updateSavedCountBadge();
+                this.renderSavedCreators();
+            }
+
+            viewSavedSequence(savedIndex) {
+                const ch = this.savedCreators[savedIndex];
+                if (!ch) return;
+                // Temporarily bind to foundChannels lookup or open modal directly
+                const tempIdx = this.foundChannels.findIndex(c => c.url === ch.url);
+                if (tempIdx >= 0) {
+                    this.viewSequence(tempIdx);
+                } else {
+                    this.foundChannels.push(ch);
+                    this.viewSequence(this.foundChannels.length - 1);
+                }
+            }
+
+            downloadSavedCSV() {
+                if (this.savedCreators.length === 0) {
+                    alert("No saved creators to export yet.");
+                    return;
+                }
+                const originalList = this.foundChannels;
+                this.foundChannels = this.savedCreators;
+                this.downloadCSV();
+                this.foundChannels = originalList;
+            }
+
             async unlockPremiumEmail(index) {
                 const channel = this.foundChannels[index];
                 if (!channel) return;
@@ -2147,6 +2626,7 @@
                 const headers = [
                     'Channel Name',
                     'Channel URL',
+                    'Promoted Product / Offer',
                     'Subscribers',
                     'Engagement Rate (%)',
                     'Target Audience Match',
@@ -2187,6 +2667,7 @@
                     ...this.foundChannels.map(channel => [
                         `"${(channel.name || '').replace(/"/g, '""')}"`,
                         channel.url || '',
+                        `"${(channel.promotedProduct || 'General Outreach').replace(/"/g, '""')}"`,
                         channel.subscribers || 0,
                         (channel.engagementRate || 0).toFixed(2),
                         channel.audienceMatch || 'Unknown',
