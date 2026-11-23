@@ -2691,7 +2691,7 @@
 
                 if (btn) {
                     btn.disabled = true;
-                    btn.textContent = "⏳ Solving...";
+                    btn.textContent = "⏳ Unlocking (~45s)...";
                 }
 
                 try {
@@ -2708,17 +2708,38 @@
                     if (data.success && data.email) {
                         channel.email = data.email;
                         channel.emailAvailable = true;
-                        if (contactCell) contactCell.innerHTML = `<a href="mailto:${data.email}">${data.email}</a>`;
+                        if (contactCell) contactCell.innerHTML = `<a href="mailto:${data.email}">${this.escapeHtml(data.email)}</a>`;
                         if (emailAvailCell) emailAvailCell.textContent = "Yes";
+
+                        // If this creator is already in Saved Creators, sync the newly unlocked email to Supabase
+                        const savedIdx = this.savedCreators.findIndex(s => (s.id && s.id === channel.id) || s.url === channel.url);
+                        if (savedIdx >= 0) {
+                            this.savedCreators[savedIdx].email = data.email;
+                            this.savedCreators[savedIdx].emailAvailable = true;
+                            localStorage.setItem('yt_saved_creators', JSON.stringify(this.savedCreators));
+                            if (this.supabaseAvailable) {
+                                await fetch('/api/saved-creators', {
+                                    method: 'POST',
+                                    headers: { 'Content-Type': 'application/json' },
+                                    body: JSON.stringify({ creator: this.savedCreators[savedIdx] })
+                                });
+                            }
+                        }
                     } else {
-                        if (btn) btn.textContent = "❌ Not Found";
+                        if (btn) {
+                            btn.disabled = false;
+                            btn.textContent = "❌ Not Listed (Retry)";
+                        }
                     }
                 } catch (e) {
                     console.error("Premium email error:", e);
-                    if (btn) btn.textContent = "⚠️ Error";
+                    if (btn) {
+                        btn.disabled = false;
+                        btn.textContent = "⚠️ Retry Unlock";
+                    }
                 }
             }
-
+            
             async findLookalikes(index) {
                 const channel = this.foundChannels[index];
                 if (!channel) return;
