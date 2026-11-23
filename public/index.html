@@ -554,19 +554,18 @@
                     <thead>
                         <tr>
                             <th>Channel</th>
+                            <th>Owner Name</th>
                             <th>Subscribers</th>
                             <th>Engagement Rate</th>
                             <th>Audience Match</th>
                             <th>Recent Video</th>
                             <th>Contact</th>
                             <th>Social Media</th>
-                            <th>Current Monetization</th>
-                            <th>Monetization Potential</th>
+                            <th>Monetization</th>
                             <th>Other Links</th>
                             <th>Email Available</th>
                             <th>Description</th>
-                            <th>AI Subject Line</th>
-                            <th>AI First Line</th>
+                            <th>Outreach Sequence</th>
                         </tr>
                     </thead>
                     <tbody id="resultsBody">
@@ -2140,13 +2139,14 @@
             
             async generateOutreachForChannel(channel) {
                 try {
-                    console.log(`🎯 Generating 6-step outreach sequence for ${channel.name}...`);
+                    console.log(`🎯 Generating 6-step outreach sequence & detecting owner for ${channel.name}...`);
 
                     const outreachResp = await fetch("/api/outreach", {
                         method: "POST",
                         headers: { "Content-Type": "application/json" },
                         body: JSON.stringify({
                             channelName: channel.name,
+                            channelHandle: channel.customUrl || "",
                             description: channel.description,
                             recentVideos: (channel.recentVideos || []).map(v => ({
                                 id: v.id,
@@ -2155,7 +2155,8 @@
                                 url: v.url
                             })),
                             recentComments: channel.recentComments || [],
-                            ownerName: channel.name,
+                            contactEmail: channel.email || "",
+                            ownerName: "",
                             currentMonetization: channel.monetization || "Unknown",
                             monetizationPotential: channel.monetizationPotential || "",
                             subscribers: channel.subscribers || 0,
@@ -2163,37 +2164,27 @@
                             productContext: this.activeProductContext || null
                         })
                     });
-                    
+
                     if (!outreachResp.ok) {
                         const errorText = await outreachResp.text();
-                        throw new Error(`API returned ${outreachResp.status}: ${errorText}`);
-                    }
+                        throw new Error(`API returned ${outreachResp.status}: ${errorText}`); }  const outreachData = await outreachResp.json(); channel.ownerName = outreachData.ownerName \vert{}\vert{} ""; channel.greetingName = outreachData.greetingName \vert{}\vert{} (channel.ownerName \vert{}\vert{} `${channel.name} team`);
+                    channel.subjectLine = outreachData.subjectLine || "";
 
-                    const outreachData = await outreachResp.json();
-                    channel.aiSubjectLine = outreachData.aiSubjectLine || outreachData.subjectLine || "";
-                    channel.aiFirstLine = outreachData.aiFirstLine || outreachData.firstLine || "";
                     if (outreachData.monetizationPotential) {
                         channel.monetizationPotential = outreachData.monetizationPotential;
                     }
 
                     channel.sequence = outreachData.sequence || [];
-                    channel.email1Subject = outreachData.email1Subject || (channel.sequence[0]?.subject || channel.aiSubjectLine);
-                    channel.email1Body = outreachData.email1Body || (channel.sequence[0]?.body || channel.aiFirstLine);
-                    channel.email2Subject = outreachData.email2Subject || (channel.sequence[1]?.subject || "");
+                    channel.email1Body = outreachData.email1Body || (channel.sequence[0]?.body || "");
                     channel.email2Body = outreachData.email2Body || (channel.sequence[1]?.body || "");
-                    channel.email3Subject = outreachData.email3Subject || (channel.sequence[2]?.subject || "");
                     channel.email3Body = outreachData.email3Body || (channel.sequence[2]?.body || "");
-                    channel.email4Subject = outreachData.email4Subject || (channel.sequence[3]?.subject || "");
                     channel.email4Body = outreachData.email4Body || (channel.sequence[3]?.body || "");
-                    channel.email5Subject = outreachData.email5Subject || (channel.sequence[4]?.subject || "");
                     channel.email5Body = outreachData.email5Body || (channel.sequence[4]?.body || "");
-                    channel.email6Subject = outreachData.email6Subject || (channel.sequence[5]?.subject || "");
                     channel.email6Body = outreachData.email6Body || (channel.sequence[5]?.body || "");
 
                 } catch (err) {
-                    console.error(`❌ Outreach sequence generation failed for ${channel.name}:`, err);
-                    channel.aiSubjectLine = "";
-                    channel.aiFirstLine = "";
+                    console.error(`❌ Outreach sequence generation failed for ${channel.name}:`, err); channel.ownerName = ""; channel.greetingName = `${channel.name} team`;
+                    channel.subjectLine = "";
                     channel.sequence = [];
                 }
             }
@@ -2365,6 +2356,10 @@
                         `;
                     }
             
+                    const ownerDisplayHtml = channel.ownerName
+                        ? `<span style="display:inline-block; background:#ebf8ff; color:#2b6cb0; padding:3px 10px; border-radius:12px; font-weight:600; font-size:0.82rem;">👤 ${this.escapeHtml(channel.ownerName)}</span>`
+                        : `<span style="display:inline-block; background:#edf2f7; color:#718096; padding:3px 10px; border-radius:12px; font-size:0.8rem;">🏢 Brand Team</span>`;
+
                     row.innerHTML = `
                         <td>
                             <a href="${channel.url}" target="_blank" class="channel-name">
@@ -2380,57 +2375,40 @@
                                 </button>
                             </div>
                         </td>
-                        <td class="subscriber-count">
-                            ${this.formatNumber(channel.subscribers)}
-                        </td>
-                        <td class="engagement-rate">
-                            ${(channel.engagementRate || 0).toFixed(2)}%
-                        </td>
+                        <td>${ownerDisplayHtml}</td>
+                        <td class="subscriber-count">${this.formatNumber(channel.subscribers)}</td>
+                        <td class="engagement-rate">${channel.engagementRate.toFixed(2)}%</td>
                         <td>
                             <span class="audience-match ${this.getMatchClass(channel.audienceMatch)}">
                                 ${channel.audienceMatch || 'Medium'}
                             </span>
                             ${channel.matchReason ? `<div style="font-size: 0.75rem; color: #4a5568; margin-top: 5px; max-width: 180px; line-height: 1.3;">${this.escapeHtml(channel.matchReason)}</div>` : ''}
                         </td>
+                        <td>${recentVideoHtml}</td>
+                        <td id="contact-cell-${idx}">${contactHtml}</td>
+                        <td>${socialLinksHtml}</td>
+                        <td>${this.escapeHtml(channel.monetization || 'Unknown')}</td>
+                        <td>${otherLinksHtml}</td>
+                        <td id="email-avail-${idx}">${channel.emailAvailable ? 'Yes' : 'No'}</td>
                         <td>
-                            ${recentVideoHtml}
-                        </td>
-                        <td id="contact-cell-${idx}">
-                            ${contactHtml}
-                        </td>
-                        <td>
-                            ${socialLinksHtml}
-                        </td>
-                        <td>
-                            <span style="font-weight: 500; color: #2d3748; font-size: 0.85rem;">
-                                ${channel.monetization || 'Unknown'}
-                            </span>
+                            ${this.escapeHtml(this.truncateText(channel.description || '', 180))}
                         </td>
                         <td>
-                            <span style="display: inline-block; padding: 4px 10px; border-radius: 12px; background: #e8f4fd; color: #1976d2; font-weight: 600; font-size: 0.8rem; border: 1px solid #bbdefb;">
-                                💡 ${channel.monetizationPotential || 'Digital Products & Community'}
-                            </span>
-                        </td>
-                        <td>
-                            ${(channel.otherLinks || []).slice(0, 3).join(' | ')}
-                        </td>
-                        <td id="email-avail-${idx}">
-                            ${channel.emailAvailable ? 'Yes' : 'No'}
-                        </td>
-                        <td>
-                            ${this.escapeHtml(this.truncateText(channel.description || '', 200))}
-                        </td>
-                        <td>
-                            ${this.escapeHtml(channel.aiSubjectLine || '')}
-                        </td>
-                        <td>
-                            ${this.escapeHtml(channel.aiFirstLine || '')}
+                            <div style="font-weight: 600; color: #2d3748; font-size: 0.85rem; margin-bottom: 4px;">
+                                Subject: ${this.escapeHtml(channel.subjectLine || 'Ready')}
+                            </div>
+                            <div style="font-size: 0.8rem; color: #718096; margin-bottom: 8px;">
+                                ${this.escapeHtml(this.truncateText(channel.email1Body || '', 85))}
+                            </div>
+                            <button onclick="window.finderApp.viewSequence(${idx})" style="padding: 5px 12px; font-size: 0.75rem; background: linear-gradient(135deg, #667eea, #764ba2); color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: 600; display: inline-flex; align-items: center; gap: 4px;">
+                                📨 View 6-Step Sequence
+                            </button>
                         </td>
                     `;
                     tbody.appendChild(row);
                 });
             }
-      
+
             viewSequence(index) {
                 const channel = this.foundChannels[index];
                 if (!channel) return;
@@ -2440,41 +2418,57 @@
                 const sub = document.getElementById('modalChannelSub');
                 const content = document.getElementById('modalSequenceContent');
 
-                title.textContent = `Outreach Campaign for ${channel.name}`;
-                sub.textContent = `Target Potential: ${channel.monetizationPotential || 'Digital Products & Paid Community'}`;
+                const ownerBadgeText = channel.ownerName ? `Owner: ${channel.ownerName}` : `Greeting: ${channel.greetingName || channel.name + ' team'}`;
+                title.textContent = `Outreach Thread for ${channel.name}`;
+                sub.textContent = `${ownerBadgeText} • ${channel.monetizationPotential || 'Partnership Sequence'}`;
                 content.innerHTML = '';
 
                 this.activeModalChannel = channel;
 
+                const masterSubject = channel.subjectLine || `Question for ${channel.name}`;
+
+                // Single Master Thread Subject Line Banner at top of modal
+                const subjectBanner = document.createElement('div');
+                subjectBanner.style.cssText = 'background: #ebf8ff; border: 1px solid #90cdf4; border-radius: 10px; padding: 14px 16px; display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap;';
+                subjectBanner.innerHTML = `
+                    <div style="font-size: 0.92rem; color: #2c5282;">
+                        <strong>Thread Subject Line (Email 1):</strong> ${this.escapeHtml(masterSubject)}
+                    </div>
+                    <button onclick="navigator.clipboard.writeText(this.getAttribute('data-copy')); this.textContent='Copied!'; setTimeout(() => this.textContent='📋 Copy Subject', 1500);"
+                            data-copy="${this.escapeHtml(masterSubject)}"
+                            style="padding: 5px 12px; font-size: 0.78rem; background: white; border: 1px solid #63b3ed; color: #2b6cb0; border-radius: 6px; cursor: pointer; font-weight: 600;">
+                        📋 Copy Subject
+                    </button>
+                `;
+                content.appendChild(subjectBanner);
+
                 const sequence = channel.sequence && channel.sequence.length > 0 
                     ? channel.sequence 
                     : [
-                        { step: 1, title: "Observation & Pain Point Hook", subject: channel.email1Subject || channel.aiSubjectLine, body: channel.email1Body || channel.aiFirstLine },
-                        { step: 2, title: "The Monetization Gap", subject: channel.email2Subject, body: channel.email2Body },
-                        { step: 3, title: "The Value Asset Offer", subject: channel.email3Subject, body: channel.email3Body },
-                        { step: 4, title: "Social Proof & Volatility Angle", subject: channel.email4Subject, body: channel.email4Body },
-                        { step: 5, title: "Low-Friction 2-Line Bump", subject: channel.email5Subject, body: channel.email5Body },
-                        { step: 6, title: "Permission to Close File", subject: channel.email6Subject, body: channel.email6Body }
-                    ].filter(e => e.body || e.subject);
+                        { step: 1, title: "Observation & Pain Point Hook", body: channel.email1Body },
+                        { step: 2, title: "The Monetization Gap", body: channel.email2Body },
+                        { step: 3, title: "The Value Asset Offer", body: channel.email3Body },
+                        { step: 4, title: "Social Proof & Volatility Angle", body: channel.email4Body },
+                        { step: 5, title: "Low-Friction 2-Line Bump", body: channel.email5Body },
+                        { step: 6, title: "Permission to Close File", body: channel.email6Body }
+                    ].filter(e => e.body);
 
                 sequence.forEach((item, i) => {
                     const stepNum = item.step || (i + 1);
                     const stepTitle = item.title || `Email ${stepNum}`;
-                    const subject = item.subject || `Email ${stepNum}`;
                     const body = item.body || '';
 
                     const card = document.createElement('div');
                     card.style.cssText = 'background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; padding: 16px;';
                     card.innerHTML = `
                         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
-                            <span style="font-weight:700; color:#3182ce; font-size:0.9rem;">Step ${stepNum}: ${this.escapeHtml(stepTitle)}</span>
-                            <button onclick="navigator.clipboard.writeText(this.getAttribute('data-copy')); this.textContent='Copied!'; setTimeout(() => this.textContent='📋 Copy Email', 1500);" 
-                                    data-copy="Subject: ${this.escapeHtml(subject)}\n\n${this.escapeHtml(body)}"
+                            <span style="font-weight:700; color:#3182ce; font-size:0.9rem;">Email ${stepNum}: ${this.escapeHtml(stepTitle)}</span>
+                            <button onclick="navigator.clipboard.writeText(this.getAttribute('data-copy')); this.textContent='Copied!'; setTimeout(() => this.textContent='📋 Copy Body', 1500);" 
+                                    data-copy="${this.escapeHtml(body)}"
                                     style="padding:4px 10px; font-size:0.75rem; background:#edf2f7; border:1px solid #cbd5e0; border-radius:5px; cursor:pointer; font-weight:600;">
-                                📋 Copy Email
+                                📋 Copy Body
                             </button>
                         </div>
-                        <div style="font-size:0.85rem; color:#2d3748; margin-bottom:8px;"><strong>Subject:</strong> ${this.escapeHtml(subject)}</div>
                         <div style="font-size:0.85rem; color:#4a5568; white-space:pre-wrap; background:white; padding:12px; border-radius:8px; border:1px solid #edf2f7; line-height:1.45;">${this.escapeHtml(body)}</div>
                     `;
                     content.appendChild(card);
@@ -2487,16 +2481,17 @@
                 if (!this.activeModalChannel) return;
                 const ch = this.activeModalChannel;
                 const emails = [
-                    `=== STEP 1: ${ch.email1Subject} ===\n${ch.email1Body}`,
-                    `=== STEP 2: ${ch.email2Subject} ===\n${ch.email2Body}`,
-                    `=== STEP 3: ${ch.email3Subject} ===\n${ch.email3Body}`,
-                    `=== STEP 4: ${ch.email4Subject} ===\n${ch.email4Body}`,
-                    `=== STEP 5: ${ch.email5Subject} ===\n${ch.email5Body}`,
-                    `=== STEP 6: ${ch.email6Subject} ===\n${ch.email6Body}`
+                    `MASTER SUBJECT LINE: ${ch.subjectLine || ''}`,
+                    `=== EMAIL 1 ===\n${ch.email1Body || ''}`,
+                    `=== EMAIL 2 (Follow-up in thread) ===\n${ch.email2Body || ''}`,
+                    `=== EMAIL 3 (Follow-up in thread) ===\n${ch.email3Body || ''}`,
+                    `=== EMAIL 4 (Follow-up in thread) ===\n${ch.email4Body || ''}`,
+                    `=== EMAIL 5 (Follow-up in thread) ===\n${ch.email5Body || ''}`,
+                    `=== EMAIL 6 (Follow-up in thread) ===\n${ch.email6Body || ''}`
                 ].join('\n\n' + '-'.repeat(40) + '\n\n');
 
                 navigator.clipboard.writeText(emails).then(() => {
-                    alert(`Copied all 6 sequence emails for ${ch.name} to clipboard!`);
+                    alert(`Copied subject line + all 6 sequence emails for ${ch.name} to clipboard!`);
                 });
             }
 
@@ -2624,9 +2619,15 @@
 
                             ${emailDisplay}
 
-                            <div style="margin-top:12px; font-size:0.82rem; color:#4a5568; display:flex; align-items:center; gap:6px;">
-                                <span>📦</span>
-                                <span>Promoting: <strong>${this.escapeHtml(ch.promotedProduct || 'General Outreach')}</strong></span>
+                            <div style="margin-top:12px; font-size:0.82rem; color:#4a5568; display:flex; flex-direction:column; gap:5px;">
+                                <div style="display:flex; align-items:center; gap:6px;">
+                                    <span>👤</span>
+                                    <span>Owner: <strong>${this.escapeHtml(ch.ownerName || 'Brand Team')}</strong></span>
+                                </div>
+                                <div style="display:flex; align-items:center; gap:6px;">
+                                    <span>📦</span>
+                                    <span>Promoting: <strong>${this.escapeHtml(ch.promotedProduct || 'General Outreach')}</strong></span>
+                                </div>
                             </div>
                         </div>
 
@@ -2813,6 +2814,7 @@
 
                 const headers = [
                     'Channel Name',
+                    'Owner Name',
                     'Channel URL',
                     'Promoted Product / Offer',
                     'Subscribers',
@@ -2835,26 +2837,20 @@
                     'Monetization Potential',
                     'Other Links',
                     'Description',
-                    'Email 1 Subject',
+                    'Subject Line',
                     'Email 1 Body',
-                    'Email 2 Subject',
                     'Email 2 Body',
-                    'Email 3 Subject',
                     'Email 3 Body',
-                    'Email 4 Subject',
                     'Email 4 Body',
-                    'Email 5 Subject',
                     'Email 5 Body',
-                    'Email 6 Subject',
-                    'Email 6 Body',
-                    'aiSubjectLine',
-                    'aiFirstLine'
+                    'Email 6 Body'
                 ];
 
                 const csvContent = [
                     headers.join(','),
                     ...this.foundChannels.map(channel => [
                         `"${(channel.name || '').replace(/"/g, '""')}"`,
+                        `"${(channel.ownerName || '').replace(/"/g, '""')}"`,
                         channel.url || '',
                         `"${(channel.promotedProduct || 'General Outreach').replace(/"/g, '""')}"`,
                         channel.subscribers || 0,
@@ -2880,20 +2876,13 @@
                               : ''
                             ).replace(/"/g, '""')}"`,
                         `"${(channel.description || '').replace(/"/g, '""').substring(0, 500)}"`,
-                        `"${(channel.email1Subject || channel.aiSubjectLine || '').replace(/"/g, '""')}"`,
-                        `"${(channel.email1Body || channel.aiFirstLine || '').replace(/"/g, '""')}"`,
-                        `"${(channel.email2Subject || '').replace(/"/g, '""')}"`,
+                        `"${(channel.subjectLine || '').replace(/"/g, '""')}"`,
+                        `"${(channel.email1Body || '').replace(/"/g, '""')}"`,
                         `"${(channel.email2Body || '').replace(/"/g, '""')}"`,
-                        `"${(channel.email3Subject || '').replace(/"/g, '""')}"`,
                         `"${(channel.email3Body || '').replace(/"/g, '""')}"`,
-                        `"${(channel.email4Subject || '').replace(/"/g, '""')}"`,
                         `"${(channel.email4Body || '').replace(/"/g, '""')}"`,
-                        `"${(channel.email5Subject || '').replace(/"/g, '""')}"`,
                         `"${(channel.email5Body || '').replace(/"/g, '""')}"`,
-                        `"${(channel.email6Subject || '').replace(/"/g, '""')}"`,
-                        `"${(channel.email6Body || '').replace(/"/g, '""')}"`,
-                        `"${(channel.aiSubjectLine || '').replace(/"/g, '""')}"`,
-                        `"${(channel.aiFirstLine || '').replace(/"/g, '""')}"`
+                        `"${(channel.email6Body || '').replace(/"/g, '""')}"`
                     ].join(','))
                 ].join('\n');
                 
