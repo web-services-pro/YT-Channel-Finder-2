@@ -511,8 +511,13 @@
         <div id="savedWorkspace" style="display: none; padding: 40px; background: #f8fafc; min-height: 450px;">
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 25px; flex-wrap: wrap; gap: 15px;">
                 <div>
-                    <h2 style="margin: 0; color: #1a202c; font-size: 1.6rem;">Saved Creators</h2>
-                    <p style="margin: 4px 0 0 0; color: #718096; font-size: 0.95rem;">The creators you're targeting for partnerships, with emails & sequences saved.</p>
+                    <div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
+                        <h2 style="margin: 0; color: #1a202c; font-size: 1.6rem;">Saved Creators</h2>
+                        <span id="cloudSyncBadge" style="padding: 4px 12px; border-radius: 20px; font-size: 0.8rem; font-weight: 600; background: #edf2f7; color: #4a5568;">
+                            ⏳ Checking sync...
+                        </span>
+                    </div>
+                    <p style="margin: 4px 0 0 0; color: #718096; font-size: 0.95rem;">The creators you're targeting for partnerships, synced across your devices.</p>
                 </div>
                 <div style="display: flex; gap: 10px; flex-wrap: wrap;">
                     <button type="button" onclick="window.finderApp.downloadSavedCSV()" class="download-btn">
@@ -1050,14 +1055,16 @@
             init() {
                 this.searchMode = 'general';
                 this.activeProductContext = null;
+                this.supabaseAvailable = false;
                 this.savedCreators = JSON.parse(localStorage.getItem('yt_saved_creators') || '[]');
                 this.savedProducts = JSON.parse(localStorage.getItem('yt_saved_products') || '[]');
 
-                // Check API keys availability
+                // Check API keys availability & initialize Supabase cloud sync
                 this.checkApiKeys();
                 this.checkApifyStatus();
+                this.initSupabaseSync();
 
-                // Populate saved products & saved creators UI
+                // Populate initial UI from local cache while cloud loads
                 this.refreshSavedProductsDropdown();
                 this.updateSavedCountBadge();
     
@@ -1074,6 +1081,77 @@
                 document.getElementById('newSearchBtn').addEventListener('click', () => {
                     this.resetSearch();
                 });
+            }
+
+            async initSupabaseSync() {
+                const badge = document.getElementById('cloudSyncBadge');
+                try {
+                    const statusResp = await fetch('/api/supabase-status');
+                    const statusData = await statusResp.json();
+                    this.supabaseAvailable = !!statusData.supabaseAvailable;
+
+                    if (!this.supabaseAvailable) {
+                        if (badge) {
+                            badge.textContent = '💾 Local Browser Storage';
+                            badge.style.background = '#fefcbf';
+                            badge.style.color = '#744210';
+                        }
+                        return;
+                    }
+
+                    if (badge) {
+                        badge.textContent = '☁️ Supabase Cloud Synced';
+                        badge.style.background = '#c6f6d5';
+                        badge.style.color = '#22543d';
+                    }
+
+                    // 1. Sync Saved Creators (migrate any local-only records up to Supabase, then pull merged list)
+                    if (this.savedCreators.length > 0) {
+                        await fetch('/api/saved-creators', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ creators: this.savedCreators })
+                        });
+                    }
+
+                    const creatorsResp = await fetch('/api/saved-creators');
+                    if (creatorsResp.ok) {
+                        const cData = await creatorsResp.json();
+                        if (cData.success && Array.isArray(cData.creators)) {
+                            this.savedCreators = cData.creators;
+                            localStorage.setItem('yt_saved_creators', JSON.stringify(this.savedCreators));
+                            this.updateSavedCountBadge();
+                        }
+                    }
+
+                    // 2. Sync Saved Product/Service Offers
+                    if (this.savedProducts.length > 0) {
+                        await fetch('/api/saved-products', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ products: this.savedProducts })
+                        });
+                    }
+
+                    const productsResp = await fetch('/api/saved-products');
+                    if (productsResp.ok) {
+                        const pData = await productsResp.json();
+                        if (pData.success && Array.isArray(pData.products)) {
+                            this.savedProducts = pData.products;
+                            localStorage.setItem('yt_saved_products', JSON.stringify(this.savedProducts));
+                            this.refreshSavedProductsDropdown();
+                        }
+                    }
+
+                    console.log(`☁️ Supabase sync complete: ${this.savedCreators.length} creators, ${this.savedProducts.length} products.`);
+                } catch (err) {
+                    console.warn('Supabase sync check warning:', err.message);
+                    if (badge) {
+                        badge.textContent = '⚠️ Offline Cache Mode';
+                        badge.style.background = '#fed7d7';
+                        badge.style.color = '#742a2a';
+                    }
+                }
             }
 
             switchMainTab(tab) {
@@ -1155,7 +1233,7 @@
                 });
             }
 
-            saveCurrentProduct() {
+            async saveCurrentProduct() {
                 const name = document.getElementById('productName').value.trim();
                 const description = document.getElementById('productDescription').value.trim();
                 if (!name) {
@@ -1182,7 +1260,20 @@
 
                 localStorage.setItem('yt_saved_products', JSON.stringify(this.savedProducts));
                 this.refreshSavedProductsDropdown();
-                alert(`✅ Saved "${name}" to your Product/Service Profiles!`);
+
+                if (this.supabaseAvailable) {
+                    try {
+                        await fetch('/api/saved-products', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ product: productObj })
+                        });
+                    } catch (err) {
+                        console.warn('Failed to sync product to Supabase:', err.message);
+                    }
+                }
+
+                alert(`✅ Saved "${name}" to your Product/Service Profiles${this.supabaseAvailable ? ' (Synced to Supabase)' : ''}!`);
             }
 
             loadSavedProduct(indexStr) {
@@ -1199,7 +1290,7 @@
                 document.getElementById('productBuyerPersona').value = p.buyerPersona || '';
             }
 
-            deleteSelectedProduct() {
+            async deleteSelectedProduct() {
                 const select = document.getElementById('savedProductSelect');
                 if (!select || select.value === '') {
                     alert("Select a saved product from the dropdown to delete.");
@@ -1209,6 +1300,19 @@
                 const removed = this.savedProducts.splice(idx, 1);
                 localStorage.setItem('yt_saved_products', JSON.stringify(this.savedProducts));
                 this.refreshSavedProductsDropdown();
+
+                if (this.supabaseAvailable && removed[0]?.name) {
+                    try {
+                        await fetch('/api/saved-products', {
+                            method: 'DELETE',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ name: removed[0].name })
+                        });
+                    } catch (err) {
+                        console.warn('Failed to delete product from Supabase:', err.message);
+                    }
+                }
+
                 alert(`🗑️ Removed "${removed[0]?.name}"`);
             }
 
@@ -1216,7 +1320,7 @@
                 const badge = document.getElementById('savedCountBadge');
                 if (badge) badge.textContent = this.savedCreators.length;
             }
-
+            
             async checkApiKeys() {
                 try {
                     const response = await fetch('/api/youtube-keys');
@@ -2382,7 +2486,7 @@
                 });
             }
 
-            toggleSaveCreator(index) {
+            async toggleSaveCreator(index) {
                 const channel = this.foundChannels[index];
                 if (!channel) return;
 
@@ -2397,6 +2501,20 @@
                         btn.style.borderColor = '#cbd5e0';
                         btn.style.color = '#2d3748';
                     }
+                    localStorage.setItem('yt_saved_creators', JSON.stringify(this.savedCreators));
+                    this.updateSavedCountBadge();
+
+                    if (this.supabaseAvailable) {
+                        try {
+                            await fetch('/api/saved-creators', {
+                                method: 'DELETE',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ channelId: channel.id, channelUrl: channel.url })
+                            });
+                        } catch (err) {
+                            console.warn('Supabase delete sync warning:', err.message);
+                        }
+                    }
                 } else {
                     const creatorRecord = {
                         ...channel,
@@ -2410,12 +2528,23 @@
                         btn.style.borderColor = '#48bb78';
                         btn.style.color = '#22543d';
                     }
+                    localStorage.setItem('yt_saved_creators', JSON.stringify(this.savedCreators));
+                    this.updateSavedCountBadge();
+
+                    if (this.supabaseAvailable) {
+                        try {
+                            await fetch('/api/saved-creators', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ creator: creatorRecord })
+                            });
+                        } catch (err) {
+                            console.warn('Supabase save sync warning:', err.message);
+                        }
+                    }
                 }
-
-                localStorage.setItem('yt_saved_creators', JSON.stringify(this.savedCreators));
-                this.updateSavedCountBadge();
             }
-
+            
             renderSavedCreators() {
                 const grid = document.getElementById('savedCreatorsGrid');
                 if (!grid) return;
@@ -2498,13 +2627,26 @@
                 });
             }
 
-            removeSavedCreator(savedIndex) {
+            async removeSavedCreator(savedIndex) {
+                const target = this.savedCreators[savedIndex];
                 this.savedCreators.splice(savedIndex, 1);
                 localStorage.setItem('yt_saved_creators', JSON.stringify(this.savedCreators));
                 this.updateSavedCountBadge();
                 this.renderSavedCreators();
-            }
 
+                if (this.supabaseAvailable && target) {
+                    try {
+                        await fetch('/api/saved-creators', {
+                            method: 'DELETE',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ channelId: target.id, channelUrl: target.url })
+                        });
+                    } catch (err) {
+                        console.warn('Supabase delete sync warning:', err.message);
+                    }
+                }
+            }
+            
             viewSavedSequence(savedIndex) {
                 const ch = this.savedCreators[savedIndex];
                 if (!ch) return;
