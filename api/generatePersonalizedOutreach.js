@@ -217,7 +217,7 @@ ${commentText}`;
     console.log(`🚀 Generating 6-step outreach sequence & resolving owner name for ${channelName}...`);
 
     const response = await openai.chat.completions.create({
-      model: "gpt-4o-mini",
+      model: "gpt-5.4-mini",
       temperature: 0.7,
       max_completion_tokens: 1500,
       messages: [
