@@ -420,13 +420,18 @@ function unwrapAndClassifyLinks(rawUrls = []) {
   };
 
   const linkInBioDomains = ["linktr.ee", "beacons.ai", "stan.store", "bio.link", "lnk.bio", "carrd.co", "bit.ly", "tinyurl.com"];
-  const ignoredDomains = ["youtube.com", "youtu.be", "google.com", "gstatic.com", "ggpht.com", "googleapis.com", "w3.org", "schema.org"];
+  const ignoredDomains = [
+    "youtube.com", "youtu.be", "ytimg.com", "googleusercontent.com",
+    "google.com", "gstatic.com", "ggpht.com", "googleapis.com",
+    "doubleclick.net", "w3.org", "schema.org"
+  ];
 
   const seen = new Set();
 
   for (let raw of rawUrls) {
     if (!raw || typeof raw !== "string") continue;
-
+    if (/\.(?:jpg|jpeg|png|gif|webp|svg)(?:\?|$)/i.test(raw)) continue;
+    
     // Unwrap YouTube redirect tracking URLs
     if (raw.includes("youtube.com/redirect")) {
       try {
