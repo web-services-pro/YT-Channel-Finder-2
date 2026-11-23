@@ -700,15 +700,20 @@ app.post("/api/generate-queries", async (req, res) => {
     let userPrompt = "";
 
     if (hasProduct) {
-      systemPrompt = `You are an expert influencer marketing strategist and YouTube SEO specialist.
-A creator/business wants to find YouTube channels whose audiences would buy their product or service via affiliate partnerships, joint ventures, or sponsorships.
+      systemPrompt = `You are an expert influencer partnership strategist and YouTube SEO specialist.
+A user wants to find YouTube channels whose VIEWERS (audience) match the Ideal Buyer profile for their product or service—so they can partner with those creators via affiliate deals, joint ventures, or sponsorships.
 
-Analyze their Product/Service details and generate 12 to 15 targeted YouTube search queries to discover creators whose viewers match the ideal buyer profile.
+CRITICAL STRATEGY (AUDIENCE CONGREGATION):
+Do NOT just search for the product/service itself (which mostly surfaces direct competitors). Instead, generate 12 to 15 YouTube search queries targeting the ecosystems where the Ideal Buyers actively watch content:
+1. Complementary, non-competing SaaS tools, software, or gear the buyers use daily (e.g., tutorials, reviews, workflows for tools used by this buyer).
+2. Professional skills, operations, training, or craft channels built specifically for this buyer's role or hobby.
+3. Industry associations, conferences, podcasts, and trade educators followed by these buyers.
+4. Adjacent problems the buyer faces right before or after needing the user's offer.
 
 Rules:
-1. Return ONLY a valid JSON object with a "queries" array of strings AND an "inferredNiches" array of 3-4 target creator niches:
-   {"queries": ["query 1", "query 2", ...], "inferredNiches": ["niche 1", "niche 2"]}
-2. Every search query MUST be specific to the buyer's problem, niche, or topic so YouTube returns relevant creators—NEVER output detached generic words like "how to fix" or "reviews" without the topic attached.
+1. Return ONLY a valid JSON object:
+   {"queries": ["query 1", "query 2", ...], "inferredNiches": ["niche 1", "niche 2", "niche 3"]}
+2. Every query MUST stay anchored to the buyer's domain/identity so YouTube returns relevant creators—NEVER output detached generic phrases like "how to fix" or "best software" without the buyer's industry/context attached.
 3. Keep each query between 2 and 5 words.`;
 
       userPrompt = `Product / Service Name: ${productContext.name}
@@ -716,7 +721,7 @@ Category: ${productContext.category || "Digital Product / Service"}
 What It Is: ${productContext.description || "N/A"}
 Price: $${productContext.price || "N/A"}
 Who Buys It (Ideal Buyer): ${productContext.buyerPersona || targetAudience || "N/A"}
-Optional Target Creator Niches: ${productContext.targetNiches || niche || "Auto-infer best niches from product"}`;
+Optional Target Creator Niches: ${productContext.targetNiches || niche || "Auto-infer best non-competing niches where buyers congregate"}`;
     } else {
       systemPrompt = `You are an expert YouTube SEO specialist and audience researcher.
 Generate 12 to 15 diverse, highly targeted YouTube search queries for ANY niche provided by the user.
@@ -760,7 +765,7 @@ Respond ONLY with JSON format: {"queries": ["query1", "query2", ...]}`;
   }
 });
 
-// --- Endpoint for Dynamic Batch AI Channel Relevance Evaluation ---
+// --- Endpoint for Dynamic Batch AI Channel Relevance Evaluation (Multi-Video + Fit Reasoning) ---
 app.post("/api/analyze-relevance", async (req, res) => {
   try {
     const { niche, targetAudience, productContext, channels } = req.body;
@@ -777,31 +782,56 @@ app.post("/api/analyze-relevance", async (req, res) => {
     const openai = new OpenAI({ apiKey: OPENAI_API_KEY });
     const hasProduct = !!(productContext && productContext.name && productContext.name.trim().length > 0);
 
-    const systemPrompt = `You are an expert creator relevance filter for an influencer research and partnership platform.
-Evaluate whether each YouTube channel genuinely reaches the target buyers/audience and fits the search criteria, or if it is an unrelated false positive.
+    const systemPrompt = hasProduct
+      ? `You are an expert creator partnership evaluator for a B2B/B2C influencer platform.
+Your job is to evaluate whether each YouTube channel's AUDIENCE (viewers) matches the Ideal Buyer profile for the user's product/service, so they can form an affiliate, joint venture, or sponsorship partnership.
 
-Classification Rules:
-- "Very High": The channel's audience and content directly match the ideal buyers/niche.
-- "High": The channel frequently covers closely related topics that attract the right buyers.
-- "Medium": Broadly related or multi-topic channel with partial audience overlap.
-- "Low": Definite false positive from an entirely different industry (including music "- Topic" channels, political campaigns, or unrelated entertainment).
+CRITICAL EVALUATION RULES:
+1. AUDIENCE OVER CHANNEL TOPIC: Judge the channel by WHO WATCHES IT, NOT whether the channel teaches the user's product/service. For example, if Ideal Buyers are "personal injury attorneys", a channel dedicated to a complementary legal SaaS tool, trial advocacy, or law firm intake operations is a "Very High" match because PI attorneys are its primary viewers—even if the channel never mentions marketing or lead reactivation.
+2. EXCLUDE DIRECT COMPETITORS: If a channel is run by a direct competitor selling the exact same core product or service (e.g., an agency selling the exact same service to the same buyers), mark it as "Low" because competitors will not promote a rival offer.
+3. DISTINGUISH B2B BUYERS FROM B2C CONSUMERS: If Ideal Buyers are professionals/business owners in an industry (e.g., attorneys, doctors, contractors), channels educating those professionals are "Very High"/"High", whereas consumer-facing channels/ads aimed at retail customers/patients/victims are "Medium" or "Low".
+4. INCLUDE FIT REASONING: For every channel, provide a crisp 6-10 word "reason" explaining why its viewers fit (e.g., "Legal SaaS tutorials watched by PI firm owners") or why it was disqualified (e.g., "Direct competitor selling lead reactivation").
 
-Return valid JSON with an "evaluations" object mapping channel ID to match level:
+Classification Levels:
+- "Very High": Primary viewership is the exact Ideal Buyer, and the channel is non-competing (e.g., complementary SaaS/tool, industry educator, workflow/operations channel, trade podcast).
+- "High": Strong overlap with the Ideal Buyer audience via closely adjacent industry topics.
+- "Medium": Partial or indirect audience overlap (e.g., broad business/general niche channel or consumer-facing side of the industry).
+- "Low": Direct competitor selling the same core offer, OR unrelated industry (music "- Topic" channels, news, politics, unrelated entertainment).
+
+Return ONLY valid JSON:
 {
   "evaluations": {
-    "CHANNEL_ID": { "match": "Very High" | "High" | "Medium" | "Low" }
+    "CHANNEL_ID": { "match": "Very High" | "High" | "Medium" | "Low", "reason": "6-10 word fit explanation" }
+  }
+}`
+      : `You are an expert creator relevance filter for an influencer research platform.
+Evaluate whether each YouTube channel genuinely belongs to the target Niche and serves the Target Audience, or if it is an unrelated false positive.
+
+Classification Rules:
+- "Very High": The channel's primary focus directly matches this specific niche and audience.
+- "High": The channel frequently covers this niche alongside closely related topics.
+- "Medium": Broadly related, adjacent, or a multi-topic channel that partially covers the niche.
+- "Low": Definite false positive from an entirely different industry (including music "- Topic" channels, political campaigns, or unrelated entertainment).
+
+Return valid JSON with an "evaluations" object mapping channel ID to match level and a concise 6-10 word reason:
+{
+  "evaluations": {
+    "CHANNEL_ID": { "match": "Very High" | "High" | "Medium" | "Low", "reason": "6-10 word fit explanation" }
   }
 }`;
 
+    // Send up to 5 recent video titles per channel for accurate multi-video theme verification
     const candidateList = channels.map(c => ({
       id: c.id,
       name: c.name,
-      description: (c.description || "").slice(0, 250),
-      recentVideo: c.recentVideo ? c.recentVideo.title : ""
+      description: (c.description || "").slice(0, 280),
+      recentVideos: Array.isArray(c.recentVideos) && c.recentVideos.length > 0
+        ? c.recentVideos.slice(0, 5)
+        : (c.recentVideo ? [c.recentVideo.title] : [])
     }));
 
     const contextHeader = hasProduct
-      ? `Product to Promote: ${productContext.name} (${productContext.category || 'Product/Service'})\nProduct Description: ${productContext.description || ''}\nIdeal Buyers: ${productContext.buyerPersona || targetAudience || ''}`
+      ? `Ideal Buyers (Who Watches & Buys): ${productContext.buyerPersona || targetAudience || ''}\nProduct/Service Being Pitched (Exclude Direct Competitors Selling This): ${productContext.name} (${productContext.category || 'Product/Service'}) — ${productContext.description || ''}\nOptional Niche Hint: ${productContext.targetNiches || 'None'}`
       : `Target Niche: ${niche}\nTarget Audience: ${targetAudience || "General"}`;
 
     const userPrompt = `${contextHeader}\n\nChannels to evaluate:\n${JSON.stringify(candidateList, null, 2)}`;
