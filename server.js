@@ -402,112 +402,135 @@ app.get("/api/channel-data", async (req, res) => {
   }
 });
 
-let chromiumUnavailableInEnv = false;
+// --- Helper: Unwrap YouTube redirect URLs & classify links ---
+function unwrapAndClassifyLinks(rawUrls = []) {
+  const websites = [];
+  const otherLinks = [];
+  const social = {};
 
-// --- Enhanced Scrape About Page ---
+  const socialPatterns = {
+    instagram: /instagram\.com\/([^\/\?\s]+)/i,
+    twitter: /(?:twitter\.com|x\.com)\/([^\/\?\s]+)/i,
+    facebook: /facebook\.com\/([^\/\?\s]+)/i,
+    tiktok: /tiktok\.com\/@?([^\/\?\s]+)/i,
+    linkedin: /linkedin\.com\/(?:in|company)\/([^\/\?\s]+)/i,
+    discord: /(?:discord\.gg|discord\.com\/invite)\/([^\/\?\s]+)/i,
+    twitch: /twitch\.tv\/([^\/\?\s]+)/i,
+    patreon: /patreon\.com\/([^\/\?\s]+)/i
+  };
+
+  const linkInBioDomains = ["linktr.ee", "beacons.ai", "stan.store", "bio.link", "lnk.bio", "carrd.co", "bit.ly", "tinyurl.com"];
+  const ignoredDomains = ["youtube.com", "youtu.be", "google.com", "gstatic.com", "ggpht.com", "googleapis.com", "w3.org", "schema.org"];
+
+  const seen = new Set();
+
+  for (let raw of rawUrls) {
+    if (!raw || typeof raw !== "string") continue;
+
+    // Unwrap YouTube redirect tracking URLs
+    if (raw.includes("youtube.com/redirect")) {
+      try {
+        const parsed = new URL(raw.startsWith("http") ? raw : `https://www.youtube.com${raw}`);
+        const target = parsed.searchParams.get("q");
+        if (target) raw = decodeURIComponent(target);
+      } catch {}
+    }
+
+    if (!raw.startsWith("http://") && !raw.startsWith("https://")) {
+      raw = `https://${raw}`;
+    }
+
+    let parsedUrl;
+    try {
+      parsedUrl = new URL(raw);
+    } catch {
+      continue;
+    }
+
+    const host = parsedUrl.hostname.toLowerCase().replace(/^www\./, "");
+    if (!host || ignoredDomains.some(d => host === d || host.endsWith(`.${d}`))) {
+      continue;
+    }
+
+    const cleanHref = parsedUrl.href.replace(/\/$/, "");
+    if (seen.has(cleanHref)) continue;
+    seen.add(cleanHref);
+
+    // Check if social media profile
+    let matchedSocial = false;
+    for (const [platform, regex] of Object.entries(socialPatterns)) {
+      if (regex.test(cleanHref)) {
+        if (!social[platform]) social[platform] = cleanHref;
+        matchedSocial = true;
+        break;
+      }
+    }
+    if (matchedSocial) continue;
+
+    // Check if link-in-bio aggregator vs standalone website
+    if (linkInBioDomains.some(d => host === d || host.endsWith(`.${d}`))) {
+      otherLinks.push(cleanHref);
+    } else {
+      websites.push(cleanHref);
+    }
+  }
+
+  return { websites, social, otherLinks };
+}
+
+// --- Recursively collect all external URLs & emails from ytInitialData regardless of UI key renames ---
+function extractFromYtInitialData(node, urlBucket = [], textBucket = [], depth = 0) {
+  if (!node || depth > 25) return;
+
+  if (typeof node === "string") {
+    if (node.includes("youtube.com/redirect") || node.startsWith("http://") || node.startsWith("https://")) {
+      urlBucket.push(node);
+    }
+    if (node.includes("@") && node.length < 300) {
+      textBucket.push(node);
+    }
+    return;
+  }
+
+  if (Array.isArray(node)) {
+    for (const item of node) {
+      extractFromYtInitialData(item, urlBucket, textBucket, depth + 1);
+    }
+    return;
+  }
+
+  if (typeof node === "object") {
+    // Capture dedicated external link view-models directly
+    if (node.urlEndpoint && typeof node.urlEndpoint.url === "string") {
+      urlBucket.push(node.urlEndpoint.url);
+    }
+    if (typeof node.url === "string" && (node.url.startsWith("http") || node.url.includes("youtube.com/redirect"))) {
+      urlBucket.push(node.url);
+    }
+    for (const val of Object.values(node)) {
+      extractFromYtInitialData(val, urlBucket, textBucket, depth + 1);
+    }
+  }
+}
+
+// --- Zero-Puppeteer About Page Link & Metadata Extractor (ytInitialData + Consent Bypass) ---
 app.get("/api/scrape-about", async (req, res) => {
   const { channelId } = req.query;
   if (!channelId) return res.status(400).json({ error: "Missing channelId" });
 
-  // Skip immediately if Puppeteer or Chromium was already confirmed missing in this container
-  if (!puppeteer || chromiumUnavailableInEnv) {
-    return res.status(200).json({ 
-      channelId,
-      success: false,
-      emails: [],
-      social: {},
-      websites: [],
-      otherLinks: [],
-      hasBusinessInquiry: false
-    });
-  }
-  
-  let browser;
   try {
-    console.log(`Starting scrape for channel: ${channelId}`);
-    
-    // Cloud-optimized browser launch with Chromium executable detection
-    const launchOptions = {
-      headless: "new",
-      args: [
-        "--no-sandbox", 
-        "--disable-setuid-sandbox",
-        "--disable-dev-shm-usage",
-        "--disable-accelerated-2d-canvas",
-        "--no-first-run",
-        "--no-zygote",
-        "--disable-gpu",
-        "--disable-background-timer-throttling",
-        "--disable-backgrounding-occluded-windows",
-        "--disable-renderer-backgrounding",
-        "--disable-features=TranslateUI",
-        "--disable-ipc-flooding-protection"
-      ],
-      timeout: 60000
-    };
+    const aboutUrl = `https://www.youtube.com/channel/${channelId}/about`;
+    const response = await fetch(aboutUrl, {
+      headers: {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.9",
+        "Cookie": "CONSENT=YES+cb.20210328-17-p0.en+FX+471; SOCS=CAESEwgDEgk0ODE3Nzk3MjQaAmVuIAEaBgiA_LyaBg"
+      },
+      signal: AbortSignal.timeout(6000)
+    });
 
-    // Dynamically find Chrome in Puppeteer cache
-    const fs = await import('fs');
-    let foundChrome = false;
-
-    // First, try to scan the puppeteer cache directory for ANY chrome version
-    const projectCachePath = path.join(process.cwd(), '.cache', 'puppeteer', 'chrome');
-    const renderSystemCachePath = '/opt/render/.cache/puppeteer/chrome';
-    const cachePathsToScan = [projectCachePath, renderSystemCachePath];
-
-    for (const puppeteerCachePath of cachePathsToScan) {
-      try {
-        if (fs.existsSync(puppeteerCachePath)) {
-          const versions = fs.readdirSync(puppeteerCachePath);
-          console.log(`📁 Found Chrome versions in cache (${puppeteerCachePath}):`, versions);
-      
-          // Sort versions to get the latest
-          const sortedVersions = versions.sort().reverse();
-      
-          for (const version of sortedVersions) {
-            const chromePath = path.join(puppeteerCachePath, version, 'chrome-linux64', 'chrome');
-            if (fs.existsSync(chromePath)) {
-              launchOptions.executablePath = chromePath;
-              console.log(`✅ Found Chromium at: ${chromePath}`);
-              foundChrome = true;
-              break;
-            }
-          }
-        }
-      } catch (err) {
-        console.warn(`Could not scan puppeteer cache at ${puppeteerCachePath}:`, err.message);
-      }
-      if (foundChrome) break;
-    }
-
-    // Fallback to system Chrome if not found in cache
-    if (!foundChrome) {
-      const systemPaths = [
-        '/usr/bin/chromium-browser',
-        '/usr/bin/chromium',
-        '/usr/bin/google-chrome',
-        '/usr/bin/google-chrome-stable',
-        process.env.PUPPETEER_EXECUTABLE_PATH
-      ].filter(Boolean);
-  
-      for (const path of systemPaths) {
-        try {
-          if (fs.existsSync(path)) {
-            launchOptions.executablePath = path;
-            console.log(`✅ Found system Chrome at: ${path}`);
-            foundChrome = true;
-            break;
-          }
-        } catch (e) {
-          console.warn(`Failed to check path ${path}:`, e.message);
-        }
-      }
-    }
-
-    // If still no executable found, remember this so subsequent channels don't spam logs
-    if (!foundChrome) {
-      chromiumUnavailableInEnv = true;
-      console.warn('⚠️ Chromium binary not found in container — switching to fast API/Apify mode for remaining channels.');
+    if (!response.ok) {
       return res.status(200).json({
         channelId,
         success: false,
@@ -519,69 +542,49 @@ app.get("/api/scrape-about", async (req, res) => {
       });
     }
 
-    browser = await puppeteer.launch(launchOptions);
-    
-    const page = await browser.newPage();
-    
-    // Set realistic user agent and viewport
-    await page.setUserAgent(
-      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-    );
-    await page.setViewport({ width: 1920, height: 1080 });
+    const html = await response.text();
+    const rawUrls = [];
+    const textSnippets = [];
 
-    const url = `https://www.youtube.com/channel/${channelId}/about`;
-    console.log(`Navigating to: ${url}`);
-    
-    // Navigate with timeout
-    await page.goto(url, { 
-      waitUntil: "networkidle2", 
-      timeout: 30000 
-    });
-
-    // Wait for dynamic content
-    await page.waitForTimeout(2000);
-
-    // Check if page loaded correctly
-    const title = await page.title();
-    console.log(`Page title: ${title}`);
-    
-    if (title.includes('404') || title.includes('not found')) {
-      throw new Error('Channel not found or About page not accessible');
-    }
-
-    // Extract contact information
-    const contacts = await extractContactInfoFromPage(page);
-    
-    console.log(`✅ Scrape results for ${channelId}:`, {
-      emailsFound: contacts.emails.length,
-      websitesFound: contacts.websites.length,
-      socialLinksFound: contacts.socialLinksFound,
-      totalLinksFound: contacts.totalLinksFound,
-      hasBusinessInquiry: contacts.hasBusinessInquiry
-    });
-
-    await browser.close();
-
-    res.json({ 
-      channelId, 
-      aboutUrl: url,
-      success: true,
-      ...contacts 
-    });
-
-  } catch (err) {
-    console.error(`❌ Error scraping channel ${channelId}:`, err.message);
-    
-    if (browser) {
+    // 1. Parse ytInitialData JSON safely
+    const initMatch = html.match(/var ytInitialData\s*=\s*(\{[\s\S]*?\});\s*<\/script>/);
+    if (initMatch && initMatch[1]) {
       try {
-        await browser.close();
-      } catch (closeErr) {
-        console.error("Error closing browser:", closeErr.message);
+        const ytData = JSON.parse(initMatch[1]);
+        extractFromYtInitialData(ytData, rawUrls, textSnippets);
+      } catch (parseErr) {
+        console.warn(`⚠️ ytInitialData JSON parse fallback for ${channelId}`);
       }
     }
 
-    res.status(500).json({ 
-      error: err.message, 
+    // 2. Also sweep raw HTML for any youtube.com/redirect?q= links
+    const redirectMatches = html.match(/https?:\/\/www\.youtube\.com\/redirect\?[^"'\s<>\\]+/g) || [];
+    rawUrls.push(...redirectMatches);
+
+    // 3. Extract any public emails present in text snippets
+    const emailRegex = /\b[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}\b/g;
+    const emails = [...new Set(
+      (textSnippets.join(" ").match(emailRegex) || [])
+        .filter(e => !e.endsWith(".png") && !e.endsWith(".jpg") && !e.includes("example.com"))
+    )];
+
+    const { websites, social, otherLinks } = unwrapAndClassifyLinks(rawUrls);
+    const hasBusinessInquiry = /for business inquiries|view email address/i.test(html);
+
+    console.log(`🔗 About-tab extracted for ${channelId}: ${websites.length} website(s), ${Object.keys(social).length} social(s), ${otherLinks.length} other link(s)`);
+
+    return res.status(200).json({
+      channelId,
+      success: true,
+      emails,
+      social,
+      websites,
+      otherLinks,
+      hasBusinessInquiry
+    });
+  } catch (err) {
+    console.warn(`⚠️ About-tab fetch skipped for ${channelId}: ${err.message}`);
+    return res.status(200).json({
       channelId,
       success: false,
       emails: [],
