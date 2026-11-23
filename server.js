@@ -1117,6 +1117,196 @@ app.post("/api/channel-lookalikes", async (req, res) => {
   }
 });
 
+// --- Helper: Extract emails, socials, and direct /contact page URL from raw HTML ---
+function parseWebsiteHtmlForContacts(html, baseUrl) {
+  const emailRegex = /\b[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}\b/g;
+  const ignoredEmailPatterns = /\.(?:png|jpg|jpeg|gif|svg|webp|css|js)$|example\.com|sentry\.io|wixpress\.com|wordpress\.com|domain\.com/i;
+
+  const emails = [...new Set(
+    (html.match(emailRegex) || [])
+      .map(e => e.toLowerCase())
+      .filter(e => !ignoredEmailPatterns.test(e))
+  )];
+
+  const hrefMatches = [...html.matchAll(/href=["']([^"'#]+)["']/gi)].map(m => m[1]);
+  const externalUrls = [];
+  let contactPageUrl = "";
+
+  const contactKeywords = [
+    "contact", "work-with", "workwith", "partner", "sponsor",
+    "collaborat", "inquir", "get-in-touch", "reach-out", "media-kit", "mediakit"
+  ];
+
+  let baseOrigin = "";
+  let baseHost = "";
+  try {
+    const parsedBase = new URL(baseUrl);
+    baseOrigin = parsedBase.origin;
+    baseHost = parsedBase.hostname.toLowerCase().replace(/^www\./, "");
+  } catch {}
+
+  for (const href of hrefMatches) {
+    try {
+      const resolved = new URL(href, baseOrigin || baseUrl);
+      if (resolved.protocol !== "http:" && resolved.protocol !== "https:") continue;
+
+      const resolvedHost = resolved.hostname.toLowerCase().replace(/^www\./, "");
+      const fullHref = resolved.href.replace(/\/$/, "");
+
+      if (baseHost && (resolvedHost === baseHost || resolvedHost.endsWith(`.${baseHost}`))) {
+        // Internal page on the creator's own domain: check if it's a contact/partnership page
+        const pathLower = resolved.pathname.toLowerCase();
+        if (pathLower.length > 1 && contactKeywords.some(kw => pathLower.includes(kw))) {
+          // Prefer exact /contact over /about if multiple internal pages match
+          if (!contactPageUrl || pathLower.includes("contact")) {
+            contactPageUrl = fullHref;
+          }
+        }
+      } else {
+        externalUrls.push(fullHref);
+      }
+    } catch {}
+  }
+
+  const { social } = unwrapAndClassifyLinks(externalUrls);
+  return { emails, social, contactPageUrl };
+}
+
+// --- Bulk Website Contact, Social & Contact-Page Extractor (Direct HTTP + vdrmota/contact-info-scraper) ---
+app.post("/api/enrich-websites-bulk", async (req, res) => {
+  const { targets } = req.body; // Array of { channelUrl, websiteUrl, needsEmail, needsSocials }
+
+  if (!targets || !Array.isArray(targets) || targets.length === 0) {
+    return res.json({ success: true, results: {} });
+  }
+
+  console.log(`🌐 Enriching contact details from ${targets.length} creator website(s)...`);
+  const resultsMap = {};
+  const unresolvedForApify = [];
+
+  // Layer 1: Fast direct HTTP fetch of homepage + internal /contact page (0 Apify credits)
+  await Promise.all(targets.map(async (target) => {
+    const { channelUrl, websiteUrl, needsEmail } = target;
+    if (!channelUrl || !websiteUrl) return;
+
+    const entry = {
+      emails: [],
+      social: {},
+      contactPageUrl: ""
+    };
+
+    try {
+      const homeResp = await fetch(websiteUrl, {
+        headers: {
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
+          "Accept": "text/html,application/xhtml+xml"
+        },
+        signal: AbortSignal.timeout(5500)
+      });
+
+      if (homeResp.ok) {
+        const homeHtml = await homeResp.text();
+        const homeParsed = parseWebsiteHtmlForContacts(homeHtml, homeResp.url || websiteUrl);
+        entry.emails.push(...homeParsed.emails);
+        Object.assign(entry.social, homeParsed.social);
+        entry.contactPageUrl = homeParsed.contactPageUrl;
+
+        // If no email on homepage and a /contact page was found, probe the /contact page directly
+        if (entry.emails.length === 0 && entry.contactPageUrl) {
+          try {
+            const contactResp = await fetch(entry.contactPageUrl, {
+              headers: {
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36"
+              },
+              signal: AbortSignal.timeout(4500)
+            });
+            if (contactResp.ok) {
+              const contactHtml = await contactResp.text();
+              const contactParsed = parseWebsiteHtmlForContacts(contactHtml, entry.contactPageUrl);
+              entry.emails.push(...contactParsed.emails);
+              entry.social = { ...contactParsed.social, ...entry.social };
+            }
+          } catch {}
+        }
+      }
+    } catch {}
+
+    entry.emails = [...new Set(entry.emails)];
+    resultsMap[channelUrl] = entry;
+
+    // Queue for Apify deep crawl if email is still missing
+    if (needsEmail && entry.emails.length === 0) {
+      unresolvedForApify.push(target);
+    }
+  }));
+
+  // Layer 2: Apify vdrmota/contact-info-scraper for JS-rendered, Cloudflare, or Linktree sites
+  const token = getNextApifyToken();
+  if (token && unresolvedForApify.length > 0) {
+    try {
+      console.log(`🕷️ Running Apify vdrmota/contact-info-scraper on ${unresolvedForApify.length} unresolved website(s)...`);
+      const client = new ApifyClient({ token });
+
+      const run = await client.actor("vdrmota/contact-info-scraper").call({
+        startUrls: unresolvedForApify.map(t => ({ url: t.websiteUrl })),
+        maxDepth: 2,
+        maxRequestsPerStartUrl: 8,
+        sameDomain: true,
+        mergeContacts: true
+      }, { timeout: 180 });
+
+      const { items } = await client.dataset(run.defaultDatasetId).listItems();
+
+      for (const item of items) {
+        const startUrl = (item.originalStartUrl || item.url || "").toLowerCase().replace(/\/$/, "");
+        const matchedTarget = unresolvedForApify.find(t => {
+          const cleanTarget = t.websiteUrl.toLowerCase().replace(/\/$/, "");
+          return startUrl === cleanTarget || startUrl.includes(cleanTarget) || cleanTarget.includes(startUrl);
+        });
+
+        if (!matchedTarget) continue;
+        const entry = resultsMap[matchedTarget.channelUrl] || { emails: [], social: {}, contactPageUrl: "" };
+
+        if (Array.isArray(item.emails) && item.emails.length > 0) {
+          entry.emails = [...new Set([...entry.emails, ...item.emails.filter(Boolean)])];
+        }
+
+        const apifySocialMap = {
+          instagram: item.instagram,
+          twitter: item.twitter,
+          facebook: item.facebook,
+          tiktok: item.tiktok,
+          linkedin: item.linkedin,
+          discord: item.discord,
+          threads: item.threads,
+          pinterest: item.pinterest
+        };
+
+        for (const [platform, val] of Object.entries(apifySocialMap)) {
+          const firstUrl = Array.isArray(val) ? val[0] : val;
+          if (firstUrl && !entry.social[platform]) {
+            entry.social[platform] = firstUrl;
+          }
+        }
+
+        // If Apify crawled internal URLs and still found no email, capture any discovered /contact URL
+        if (entry.emails.length === 0 && !entry.contactPageUrl && Array.isArray(item.crawledUrls)) {
+          const contactMatch = item.crawledUrls.find(u => /\/(?:contact|work-with|partner|sponsor|inquir)/i.test(u));
+          if (contactMatch) {
+            entry.contactPageUrl = contactMatch;
+          }
+        }
+
+        resultsMap[matchedTarget.channelUrl] = entry;
+      }
+    } catch (apifyErr) {
+      console.warn("⚠️ Apify website contact enrichment warning:", apifyErr.message);
+    }
+  }
+
+  return res.json({ success: true, results: resultsMap });
+});
+
 // --- Supabase Cross-Device Sync Endpoints ---
 app.get("/api/supabase-status", (req, res) => {
   res.json({
