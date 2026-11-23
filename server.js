@@ -942,9 +942,10 @@ app.post("/api/extract-email-premium", async (req, res) => {
     console.log(`⚡ Initiating premium reCAPTCHA email unlock for: ${target}`);
     const client = new ApifyClient({ token });
 
+    // Actor requires timeout > 300 seconds in run options
     const run = await client.actor("dataovercoffee/youtube-channel-business-email-scraper").call({
       channels: [target]
-    }, { timeout: 120 });
+    }, { timeout: 600 });
 
     const { items } = await client.dataset(run.defaultDatasetId).listItems();
     const result = items[0] || {};
@@ -980,11 +981,12 @@ app.post("/api/channel-lookalikes", async (req, res) => {
     console.log(`🔍 Finding lookalike channels for seed: ${seed}`);
     const client = new ApifyClient({ token });
 
+    // Actor requires timeout > 300 seconds in run options
     const run = await client.actor("dataovercoffee/youtube-channel-lookalike-finder").call({
       seed_channel_ids: [seed],
       limit: Math.min(limit, 15)
-    }, { timeout: 180 });
-
+    }, { timeout: 600 });
+    
     const { items } = await client.dataset(run.defaultDatasetId).listItems();
 
     const normalizedChannels = items.map(item => ({
