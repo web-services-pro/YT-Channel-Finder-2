@@ -593,14 +593,70 @@ app.get("/api/scrape-about", async (req, res) => {
   }
 });
 
-// Updated outreach endpoint with full 6-step cold email sequence generation & Product Context
+// --- Zero-Quota Helper: Fetch Opening ~60s Transcript from YouTube Captions ---
+async function fetchVideoOpeningTranscript(videoId) {
+  if (!videoId) return "";
+  try {
+    const pageResp = await fetch(`https://www.youtube.com/watch?v=${videoId}`, {
+      headers: {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+        "Accept-Language": "en-US,en;q=0.9"
+      },
+      signal: AbortSignal.timeout(4000)
+    });
+
+    if (!pageResp.ok) return "";
+    const html = await pageResp.text();
+
+    const tracksMatch = html.match(/"captionTracks":(\[.*?\])/);
+    if (!tracksMatch) return "";
+
+    const tracks = JSON.parse(tracksMatch[1]);
+    if (!Array.isArray(tracks) || tracks.length === 0) return "";
+
+    const enTrack = tracks.find(t => t.languageCode === "en" || t.languageCode?.startsWith("en")) || tracks[0];
+    if (!enTrack || !enTrack.baseUrl) return "";
+
+    const captionResp = await fetch(enTrack.baseUrl, {
+      signal: AbortSignal.timeout(3500)
+    });
+    if (!captionResp.ok) return "";
+
+    const xml = await captionResp.text();
+    const textMatches = [...xml.matchAll(/<text[^>]*>([\s\S]*?)<\/text>/g)];
+    if (textMatches.length === 0) return "";
+
+    const openingText = textMatches
+      .slice(0, 28) // First ~45-60 seconds of speech
+      .map(m => m[1]
+        .replace(/&amp;/g, "&")
+        .replace(/&quot;/g, '"')
+        .replace(/&#39;/g, "'")
+        .replace(/&lt;/g, "<")
+        .replace(/&gt;/g, ">")
+        .replace(/<[^>]+>/g, "")
+      )
+      .join(" ")
+      .replace(/\s+/g, " ")
+      .trim();
+
+    return openingText.slice(0, 700);
+  } catch {
+    // Fail silently if captions are disabled or unavailable
+    return "";
+  }
+}
+
+// Updated outreach endpoint with 5-source Owner Name Discovery & Single-Subject 6-Email Sequence
 app.post("/api/outreach", async (req, res) => {
   try {
     const {
       channelName,
+      channelHandle,
       description,
       recentVideos,
       ownerName,
+      contactEmail,
       currentMonetization,
       monetizationPotential,
       subscribers,
@@ -608,35 +664,48 @@ app.post("/api/outreach", async (req, res) => {
       productContext
     } = req.body;
     let comments = Array.isArray(req.body.recentComments) ? req.body.recentComments : [];
+    let videoTranscript = "";
 
     console.log(`🚀 Outreach & Sequence generation request for: ${channelName}`);
 
-    // If comments are missing, fetch via YouTube Data API first; only fall back to Apify if YouTube API itself errored/quota-exhausted
-    if (comments.length === 0 && Array.isArray(recentVideos) && recentVideos.length > 0) {
+    if (Array.isArray(recentVideos) && recentVideos.length > 0) {
       const topVideo = recentVideos[0];
       const videoId = topVideo.id || (topVideo.url ? topVideo.url.split("v=")[1]?.split("&")[0] : null);
-      let youtubeApiErrored = false;
 
-      if (videoId && YOUTUBE_API_KEYS.length > 0) {
-        const apiKey = YOUTUBE_API_KEYS[Math.floor(Math.random() * YOUTUBE_API_KEYS.length)];
-        const ytComments = await fetchVideoComments(videoId, apiKey, 15);
-        youtubeApiErrored = !!ytComments.apiFailed;
-        comments = ytComments;
-      }
+      // Fetch comments (via YouTube Data API) and opening video transcript (zero-quota) in parallel
+      const commentPromise = (async () => {
+        if (comments.length > 0) return comments;
+        let youtubeApiErrored = false;
 
-      if (youtubeApiErrored && topVideo.url && typeof scrapeVideoCommentsWithApify === 'function') {
-        console.log(`⛏️ YouTube API quota fallback: mining comments via Apify for ${topVideo.url}`);
-        comments = await scrapeVideoCommentsWithApify(topVideo.url, 15);
-      }
+        if (videoId && YOUTUBE_API_KEYS.length > 0) {
+          const apiKey = YOUTUBE_API_KEYS[Math.floor(Math.random() * YOUTUBE_API_KEYS.length)];
+          const ytComments = await fetchVideoComments(videoId, apiKey, 15);
+          youtubeApiErrored = !!ytComments.apiFailed;
+          if (ytComments.length > 0) return ytComments;
+        }
+
+        if (youtubeApiErrored && topVideo.url && typeof scrapeVideoCommentsWithApify === 'function') {
+          console.log(`⛏️ YouTube API quota fallback: mining comments via Apify for ${topVideo.url}`);
+          return await scrapeVideoCommentsWithApify(topVideo.url, 15);
+        }
+        return [];
+      })();
+
+      const transcriptPromise = videoId ? fetchVideoOpeningTranscript(videoId) : Promise.resolve("");
+
+      [comments, videoTranscript] = await Promise.all([commentPromise, transcriptPromise]);
     }
 
-    console.log(`💬 Comments fed into copywriter: ${comments.length}`);
+    console.log(`💬 Comments fed: ${comments.length} | 📝 Transcript chars: ${videoTranscript.length}`);
 
     const outreach = await generatePersonalizedOutreach({
       channelName,
+      channelHandle: channelHandle || "",
       description,
       recentVideos: recentVideos || [],
       recentComments: comments,
+      videoTranscript,
+      contactEmail: contactEmail || "",
       ownerName: ownerName || "",
       currentMonetization: currentMonetization || "Unknown",
       monetizationPotential: monetizationPotential || "",
@@ -648,31 +717,28 @@ app.post("/api/outreach", async (req, res) => {
 
     res.json({
       success: true,
-      aiSubjectLine: outreach.subjectLine,
-      aiFirstLine: outreach.firstLine,
+      ownerName: outreach.ownerName || "",
+      greetingName: outreach.greetingName || "",
+      subjectLine: outreach.subjectLine || "",
       monetizationPotential: outreach.monetizationPotential || "",
       sequence: outreach.sequence || [],
-      email1Subject: outreach.email1Subject || "",
       email1Body: outreach.email1Body || "",
-      email2Subject: outreach.email2Subject || "",
       email2Body: outreach.email2Body || "",
-      email3Subject: outreach.email3Subject || "",
       email3Body: outreach.email3Body || "",
-      email4Subject: outreach.email4Subject || "",
       email4Body: outreach.email4Body || "",
-      email5Subject: outreach.email5Subject || "",
       email5Body: outreach.email5Body || "",
-      email6Subject: outreach.email6Subject || "",
       email6Body: outreach.email6Body || "",
-      commentsUsed: comments.length
+      commentsUsed: comments.length,
+      transcriptUsed: videoTranscript.length > 0
     });
   } catch (err) {
     console.error("❌ Outreach error:", err.message);
     res.status(500).json({ 
       error: err.message,
       success: false,
-      aiSubjectLine: "",
-      aiFirstLine: "",
+      ownerName: "",
+      greetingName: "",
+      subjectLine: "",
       monetizationPotential: "",
       sequence: []
     });
@@ -1078,8 +1144,10 @@ app.get("/api/saved-creators", async (req, res) => {
       promotedProduct: row.promoted_product || "General Outreach",
       monetization: row.monetization || "Unknown",
       monetizationPotential: row.monetization_potential || "",
-      aiSubjectLine: row.ai_subject_line || "",
-      aiFirstLine: row.ai_first_line || "",
+      ownerName: (row.full_data && row.full_data.ownerName) || "",
+      greetingName: (row.full_data && row.full_data.greetingName) || "",
+      subjectLine: (row.full_data && row.full_data.subjectLine) || row.ai_subject_line || "",
+      email1Body: (row.full_data && row.full_data.email1Body) || row.ai_first_line || "",
       sequence: Array.isArray(row.sequence) ? row.sequence : [],
       savedAt: row.created_at
     }));
@@ -1117,8 +1185,8 @@ app.post("/api/saved-creators", async (req, res) => {
       promoted_product: ch.promotedProduct || "General Outreach",
       monetization: ch.monetization || "Unknown",
       monetization_potential: ch.monetizationPotential || "",
-      ai_subject_line: ch.aiSubjectLine || ch.email1Subject || "",
-      ai_first_line: ch.aiFirstLine || ch.email1Body || "",
+      ai_subject_line: ch.subjectLine || "",
+      ai_first_line: ch.email1Body || "",
       sequence: Array.isArray(ch.sequence) ? ch.sequence : [],
       full_data: ch
     }));
