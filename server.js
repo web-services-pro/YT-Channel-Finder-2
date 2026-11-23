@@ -86,6 +86,40 @@ app.get("/api/health", (req, res) => {
   });
 });
 
+// Keep-alive endpoint for UptimeRobot (pings Render + queries Supabase to prevent free-tier pausing)
+app.get("/api/keep-alive", async (req, res) => {
+  try {
+    if (!supabase) {
+      return res.status(200).json({
+        status: "ok",
+        supabaseActive: false,
+        message: "Server awake, but Supabase is not configured",
+        timestamp: new Date().toISOString()
+      });
+    }
+
+    const { error } = await supabase
+      .from("saved_creators")
+      .select("id")
+      .limit(1);
+
+    if (error) throw error;
+
+    res.status(200).json({
+      status: "ok",
+      supabaseActive: true,
+      timestamp: new Date().toISOString()
+    });
+  } catch (err) {
+    console.error("❌ Keep-alive Supabase ping failed:", err.message);
+    res.status(500).json({
+      status: "error",
+      supabaseActive: false,
+      error: err.message
+    });
+  }
+});
+
 // API keys availability check
 app.get("/api/keys-status", (req, res) => {
   res.json({
