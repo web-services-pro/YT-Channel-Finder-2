@@ -1442,18 +1442,18 @@
                 const contactChannels = await this.collectContactInfo(engagedChannels);
     
                 // Step 5: Filter Top Candidates (prioritizes quota on the actual results)
-                const targetPoolSize = Math.min(formData.channelCount + 10, contactChannels.length);
+                const targetPoolSize = Math.min(formData.channelCount + 15, contactChannels.length);
                 const prioritizedCandidates = contactChannels.slice(0, targetPoolSize);
 
-                // Step 6: Get recent videos using 100x cheaper Playlist API (60-75%)
-                this.updateProgress(60, 'Fetching recent videos & generating outreach sequences...');
+                // Step 6: Fetch recent videos & analyze monetization first (60-70%)
+                this.updateProgress(60, 'Fetching recent videos & analyzing monetization...');
                 const channelsWithVideos = await this.getRecentVideos(prioritizedCandidates);
     
-                // Step 7: Analyze audience / buyer match with AI (75-85%)
-                this.updateProgress(75, 'Analyzing buyer-audience fit with AI...');
+                // Step 7: Analyze audience / buyer match with AI BEFORE generating outreach (70-78%)
+                this.updateProgress(70, 'Filtering out non-relevant channels with AI...');
                 let matchedChannels = await this.analyzeAudienceMatch(channelsWithVideos, formData.niche, formData.targetAudience, formData.productContext);
     
-                // Select final requested channel count
+                // Select final requested channel count of truly relevant creators
                 let finalChannels = matchedChannels.slice(0, formData.channelCount);
 
                 // Tag each channel with the active product context if in Product mode
@@ -1462,14 +1462,21 @@
                     ch.productContext = formData.productContext || null;
                 });
 
-                // Step 8: Bulk email extraction with Apify ONLY for top channels missing an email (85-95%)
+                // Step 8: Generate 6-step outreach sequences ONLY for verified relevant channels (78-88%)
+                for (let i = 0; i < finalChannels.length; i++) {
+                    const ch = finalChannels[i];
+                    this.updateProgress(78 + ((i / (finalChannels.length || 1)) * 10), `Writing 6-step sequence for ${ch.name}...`);
+                    await this.generateOutreachForChannel(ch);
+                }
+
+                // Step 9: Bulk email extraction with Apify ONLY for final channels missing an email (88-96%)
                 if (this.apifyAvailable) {
-                    this.updateProgress(85, 'Extracting missing emails with Apify...');
+                    this.updateProgress(88, 'Extracting missing emails with Apify...');
                     finalChannels = await this.extractEmailsWithApifyBulk(finalChannels);
                 }
 
-                // Step 9: Finalize results (95-100%)
-                this.updateProgress(95, 'Preparing results...');
+                // Step 10: Finalize results (96-100%)
+                this.updateProgress(96, 'Preparing results...');
                 this.foundChannels = finalChannels;
     
                 this.updateProgress(100, 'Search complete!');
@@ -1546,6 +1553,12 @@
                         for (const channel of channels) {
                             const subCount = channel.statistics?.subscriberCount ? parseInt(channel.statistics.subscriberCount) : 0;
                             const country = (channel.snippet?.country || '').toUpperCase();
+                            const title = channel.snippet?.title || '';
+
+                            // Skip auto-generated YouTube music "- Topic" channels
+                            if (title.endsWith(' - Topic')) {
+                                continue;
+                            }
 
                             // Filter out channels confirmed to be registered in other countries
                             // (Keeps 'US' and unassigned profiles that passed the US region search)
@@ -2110,10 +2123,7 @@
                         );
 
                         channel.monetizationPotential = this.deriveMonetizationPotential(channel);
-
-                        // Generate personalized outreach & monetization pitch
-                        await this.generateOutreachForChannel(channel);
-
+                        
                         await this.delay(60);
                     } catch (error) {
                         console.warn(`Failed to process recent videos for ${channel.name}:`, error.message);
