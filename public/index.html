@@ -1496,11 +1496,12 @@
                     if (response.ok) {
                         const data = await response.json();
                         if (data.success && Array.isArray(data.queries) && data.queries.length > 0) {
-                            console.log('🤖 AI generated queries:', data.queries);
+                            const topQueries = data.queries.slice(0, 8);
+                            console.log('🤖 AI generated queries (using top 8 for quota efficiency):', topQueries);
                             if (data.inferredNiches && data.inferredNiches.length > 0) {
                                 console.log('🎯 AI inferred target niches:', data.inferredNiches);
                             }
-                            return data.queries;
+                            return topQueries;
                         }
                     }
                 } catch (err) {
@@ -2226,7 +2227,7 @@
                 if (!channels || channels.length === 0) return [];
 
                 try {
-                    // Send candidate channels to AI in a single batch
+                    // Send candidate channels with up to 5 recent video titles to AI in a single batch
                     const response = await fetch('/api/analyze-relevance', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
@@ -2238,6 +2239,7 @@
                                 id: c.id,
                                 name: c.name,
                                 description: c.description,
+                                recentVideos: (c.recentVideos || []).slice(0, 5).map(v => v.title),
                                 recentVideo: c.recentVideo ? { title: c.recentVideo.title } : null
                             }))
                         })
@@ -2249,6 +2251,7 @@
                             channels.forEach(ch => {
                                 const evalResult = data.evaluations[ch.id];
                                 ch.audienceMatch = evalResult?.match || 'Medium';
+                                ch.matchReason = evalResult?.reason || '';
                             });
                         }
                     }
@@ -2387,6 +2390,7 @@
                             <span class="audience-match ${this.getMatchClass(channel.audienceMatch)}">
                                 ${channel.audienceMatch || 'Medium'}
                             </span>
+                            ${channel.matchReason ? `<div style="font-size: 0.75rem; color: #4a5568; margin-top: 5px; max-width: 180px; line-height: 1.3;">${this.escapeHtml(channel.matchReason)}</div>` : ''}
                         </td>
                         <td>
                             ${recentVideoHtml}
@@ -2814,6 +2818,7 @@
                     'Subscribers',
                     'Engagement Rate (%)',
                     'Target Audience Match',
+                    'AI Fit Reason',
                     'Recent Video Title',
                     'Recent Video URL',
                     'Recent Video Date',
@@ -2855,6 +2860,7 @@
                         channel.subscribers || 0,
                         (channel.engagementRate || 0).toFixed(2),
                         channel.audienceMatch || 'Unknown',
+                        `"${(channel.matchReason || '').replace(/"/g, '""')}"`,
                         channel.recentVideo ? `"${(channel.recentVideo.title || '').replace(/"/g, '""')}"` : '',
                         channel.recentVideo ? channel.recentVideo.url : '',
                         channel.recentVideo ? channel.recentVideo.publishedAt : '',
