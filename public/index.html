@@ -1473,14 +1473,18 @@
                     await this.generateOutreachForChannel(ch);
                 }
 
-                // Step 9: Bulk email extraction with Apify ONLY for final channels missing an email (88-96%)
+                // Step 9: Bulk email extraction with Apify ONLY for final channels missing an email (86-92%)
                 if (this.apifyAvailable) {
-                    this.updateProgress(88, 'Extracting missing emails with Apify...');
+                    this.updateProgress(86, 'Extracting missing emails from YouTube with Apify...');
                     finalChannels = await this.extractEmailsWithApifyBulk(finalChannels);
                 }
 
-                // Step 10: Finalize results (96-100%)
-                this.updateProgress(96, 'Preparing results...');
+                // Step 10: Crawl creator websites for missing emails, socials, or direct /contact form URLs (92-97%)
+                this.updateProgress(92, 'Scanning creator websites for contact info & contact forms...');
+                finalChannels = await this.enrichFromCreatorWebsitesBulk(finalChannels);
+
+                // Step 11: Finalize results (97-100%)
+                this.updateProgress(97, 'Preparing results...');
                 this.foundChannels = finalChannels;
     
                 this.updateProgress(100, 'Search complete!');
@@ -1816,6 +1820,82 @@
                     return enrichedChannels;
                 } catch (error) {
                     console.error('❌ Bulk email extraction failed:', error.message);
+                    return channels;
+                }
+            }
+
+            /**
+             * Visit creator websites (and link-in-bio pages) to extract missing emails or social profiles.
+             * If no email is published on the site, stores the direct /contact form URL in `otherLinks`.
+             */
+            async enrichFromCreatorWebsitesBulk(channels) {
+                if (!channels || channels.length === 0) return channels;
+
+                const targets = channels
+                    .map(ch => {
+                        const websiteUrl = ch.website || (Array.isArray(ch.otherLinks) && ch.otherLinks[0]) || '';
+                        const needsEmail = !ch.email;
+                        const needsSocials = !ch.instagram || !ch.twitter || !ch.linkedin || !ch.tiktok;
+                        return {
+                            channelUrl: ch.url,
+                            websiteUrl,
+                            needsEmail,
+                            needsSocials
+                        };
+                    })
+                    .filter(t => t.websiteUrl && (t.needsEmail || t.needsSocials));
+
+                if (targets.length === 0) return channels;
+
+                try {
+                    const resp = await fetch('/api/enrich-websites-bulk', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ targets })
+                    });
+
+                    if (!resp.ok) return channels;
+                    const data = await resp.json();
+                    if (!data.success || !data.results) return channels;
+
+                    return channels.map(ch => {
+                        const webData = data.results[ch.url];
+                        if (!webData) return ch;
+
+                        const updated = { ...ch };
+
+                        // 1. Merge any emails found on their website
+                        if (Array.isArray(webData.emails) && webData.emails.length > 0) {
+                            const mergedEmails = [...new Set([...(updated.emails || []), ...webData.emails])];
+                            updated.emails = mergedEmails;
+                            if (!updated.email) {
+                                updated.email = mergedEmails[0];
+                            }
+                            updated.emailAvailable = true;
+                        }
+
+                        // 2. Fill in any missing social profiles discovered on their website
+                        if (webData.social && typeof webData.social === 'object') {
+                            for (const [platform, link] of Object.entries(webData.social)) {
+                                if (link && !updated[platform]) {
+                                    updated[platform] = link;
+                                }
+                            }
+                        }
+
+                        // 3. If no email was found on the website, store the direct /contact page URL at the top of Other Links
+                        if (!updated.email && webData.contactPageUrl) {
+                            updated.contactPageUrl = webData.contactPageUrl;
+                            updated.otherLinks = [
+                                webData.contactPageUrl,
+                                ...(updated.otherLinks || []).filter(u => u !== webData.contactPageUrl)
+                            ];
+                        }
+
+                        return updated;
+                    });
+                } catch (err) {
+                    console.warn('⚠️ Website contact enrichment skipped:', err.message);
                     return channels;
                 }
             }
@@ -2397,6 +2477,17 @@
                         `;
                     }
             
+                    // Build Other Links column (highlighting direct /contact form URLs first)
+                    const otherLinksList = Array.isArray(channel.otherLinks) ? channel.otherLinks.slice(0, 3) : [];
+                    const otherLinksHtml = otherLinksList.length > 0
+                        ? `<div class="social-links">${otherLinksList.map(link => {
+                            const isContactPage = /\/(?:contact|work-with|partner|sponsor|inquir)/i.test(link) || link === channel.contactPageUrl;
+                            const label = isContactPage ? '📩 Contact Form' : this.truncateText(link.replace(/^https?:\/\/(?:www\.)?/, ''), 24);
+                            const badgeStyle = isContactPage ? 'background:#ebf8ff; color:#2b6cb0; border:1px solid #90cdf4; font-weight:600;' : '';
+                            return `<a href="${link}" target="_blank" class="social-link" style="${badgeStyle}" title="${this.escapeHtml(link)}">${this.escapeHtml(label)}</a>`;
+                        }).join('')}</div>`
+                        : 'None';
+                    
                     const ownerDisplayHtml = channel.ownerName
                         ? `<span style="display:inline-block; background:#ebf8ff; color:#2b6cb0; padding:3px 10px; border-radius:12px; font-weight:600; font-size:0.82rem;">👤 ${this.escapeHtml(channel.ownerName)}</span>`
                         : `<span style="display:inline-block; background:#edf2f7; color:#718096; padding:3px 10px; border-radius:12px; font-size:0.8rem;">🏢 Brand Team</span>`;
