@@ -328,9 +328,7 @@ async function fetchRecentVideos(channelId, apiKey, maxResults = 5) {
 
 /**
  * Fetch top-level comments for a given video ID
- * @param {string} videoId 
- * @param {string} apiKey 
- * @param {number} maxComments 
+ * Returns an array of comment strings; sets non-enumerable `apiFailed` flag only on quota/network errors
  */
 async function fetchVideoComments(videoId, apiKey, maxComments = 20) {
   try {
@@ -338,8 +336,19 @@ async function fetchVideoComments(videoId, apiKey, maxComments = 20) {
     const resp = await fetch(url);
     const data = await resp.json();
 
-    if (!data.items) {
-      console.warn(`⚠️ No comments found for video: ${videoId}`);
+    if (data.error) {
+      const reason = data.error.errors?.[0]?.reason || "";
+      if (reason === "commentsDisabled" || reason === "videoNotFound") {
+        // Comments are turned off on YouTube; no need to waste Apify credits scraping
+        return [];
+      }
+      console.warn(`⚠️ YouTube comment API error (${reason}) for ${videoId}`);
+      const failedArr = [];
+      failedArr.apiFailed = true;
+      return failedArr;
+    }
+
+    if (!data.items || data.items.length === 0) {
       return [];
     }
 
@@ -348,7 +357,9 @@ async function fetchVideoComments(videoId, apiKey, maxComments = 20) {
     );
   } catch (err) {
     console.error(`❌ Failed to fetch comments for ${videoId}:`, err.message);
-    return [];
+    const failedArr = [];
+    failedArr.apiFailed = true;
+    return failedArr;
   }
 }
 
@@ -391,15 +402,16 @@ app.get("/api/channel-data", async (req, res) => {
   }
 });
 
+let chromiumUnavailableInEnv = false;
+
 // --- Enhanced Scrape About Page ---
 app.get("/api/scrape-about", async (req, res) => {
   const { channelId } = req.query;
   if (!channelId) return res.status(400).json({ error: "Missing channelId" });
 
-  // Check if puppeteer is available
-  if (!puppeteer) {
-    return res.status(503).json({ 
-      error: "Puppeteer not available in this environment",
+  // Skip immediately if Puppeteer or Chromium was already confirmed missing in this container
+  if (!puppeteer || chromiumUnavailableInEnv) {
+    return res.status(200).json({ 
       channelId,
       success: false,
       emails: [],
@@ -409,7 +421,7 @@ app.get("/api/scrape-about", async (req, res) => {
       hasBusinessInquiry: false
     });
   }
-
+  
   let browser;
   try {
     console.log(`Starting scrape for channel: ${channelId}`);
@@ -492,10 +504,19 @@ app.get("/api/scrape-about", async (req, res) => {
       }
     }
 
-    // If still no executable found, throw error
+    // If still no executable found, remember this so subsequent channels don't spam logs
     if (!foundChrome) {
-      console.error('❌ No Chromium executable found anywhere');
-      throw new Error('Chromium executable not found. Please ensure build command ran successfully.');
+      chromiumUnavailableInEnv = true;
+      console.warn('⚠️ Chromium binary not found in container — switching to fast API/Apify mode for remaining channels.');
+      return res.status(200).json({
+        channelId,
+        success: false,
+        emails: [],
+        social: {},
+        websites: [],
+        otherLinks: [],
+        hasBusinessInquiry: false
+      });
     }
 
     browser = await puppeteer.launch(launchOptions);
@@ -590,20 +611,21 @@ app.post("/api/outreach", async (req, res) => {
 
     console.log(`🚀 Outreach & Sequence generation request for: ${channelName}`);
 
-    // If comments are missing, attempt to mine them from the most recent video
+    // If comments are missing, fetch via YouTube Data API first; only fall back to Apify if YouTube API itself errored/quota-exhausted
     if (comments.length === 0 && Array.isArray(recentVideos) && recentVideos.length > 0) {
       const topVideo = recentVideos[0];
       const videoId = topVideo.id || (topVideo.url ? topVideo.url.split("v=")[1]?.split("&")[0] : null);
-      
-      // Attempt 1: Fetch via YouTube Data API
+      let youtubeApiErrored = false;
+
       if (videoId && YOUTUBE_API_KEYS.length > 0) {
         const apiKey = YOUTUBE_API_KEYS[Math.floor(Math.random() * YOUTUBE_API_KEYS.length)];
-        comments = await fetchVideoComments(videoId, apiKey, 15);
+        const ytComments = await fetchVideoComments(videoId, apiKey, 15);
+        youtubeApiErrored = !!ytComments.apiFailed;
+        comments = ytComments;
       }
 
-      // Attempt 2: If YouTube API returned 0, mine via Apify
-      if (comments.length === 0 && topVideo.url && typeof scrapeVideoCommentsWithApify === 'function') {
-        console.log(`⛏️ Mining comments via Apify for video: ${topVideo.url}`);
+      if (youtubeApiErrored && topVideo.url && typeof scrapeVideoCommentsWithApify === 'function') {
+        console.log(`⛏️ YouTube API quota fallback: mining comments via Apify for ${topVideo.url}`);
         comments = await scrapeVideoCommentsWithApify(topVideo.url, 15);
       }
     }
@@ -762,7 +784,7 @@ Classification Rules:
 - "Very High": The channel's audience and content directly match the ideal buyers/niche.
 - "High": The channel frequently covers closely related topics that attract the right buyers.
 - "Medium": Broadly related or multi-topic channel with partial audience overlap.
-- "Low": Definite false positive from an entirely different industry.
+- "Low": Definite false positive from an entirely different industry (including music "- Topic" channels, political campaigns, or unrelated entertainment).
 
 Return valid JSON with an "evaluations" object mapping channel ID to match level:
 {
@@ -817,13 +839,12 @@ async function scrapeVideoCommentsWithApify(videoUrl, maxComments = 15) {
     const client = new ApifyClient({ token });
     const run = await client.actor("streamers/youtube-comments-scraper").call({
       startUrls: [{ url: videoUrl }],
-      maxComments: maxComments,
-      sortCommentsBy: "TOP_COMMENTS"
+      maxComments: maxComments
     }, { timeout: 60 });
 
     const { items } = await client.dataset(run.defaultDatasetId).listItems();
     return items
-      .map(item => item.textDisplay || item.text || item.content || "")
+      .map(item => item.textDisplay || item.text || item.comment || item.content || "")
       .filter(Boolean)
       .slice(0, maxComments);
   } catch (err) {
@@ -832,7 +853,7 @@ async function scrapeVideoCommentsWithApify(videoUrl, maxComments = 15) {
   }
 }
 
-// --- Enhanced bulk email extraction using lurkapi (with exporter24 fallback) ---
+// --- Reliable Bulk Email Extraction (exporter24 primary + apidojo fallback) ---
 app.post("/api/extract-emails-bulk", async (req, res) => {
   const { channelUrls } = req.body;
   
@@ -849,46 +870,52 @@ app.post("/api/extract-emails-bulk", async (req, res) => {
   console.log(`🚀 Starting Apify bulk email extraction for ${channelUrls.length} channels...`);
 
   try {
-    // Attempt 1: Run lurkapi/youtube-channel-email-scraper
-    const run = await client.actor("lurkapi/youtube-channel-email-scraper").call({
-      urls: channelUrls,
-      scanLinkedWebsites: true
-    }, { timeout: 120 });
+    // Primary: exporter24/youtube-email-bulk-scraper (fast, reliable for batches <= 30)
+    const run = await client.actor("exporter24/youtube-email-bulk-scraper").call({
+      urls: channelUrls.map(url => ({ url }))
+    }, { timeout: 180 });
 
     const { items } = await client.dataset(run.defaultDatasetId).listItems();
     const resultsMap = {};
+    let totalEmailsFound = 0;
 
     items.forEach(item => {
-      const channelKey = item.channelUrl || item.url || (item.channelId ? `https://youtube.com/channel/${item.channelId}` : null);
-      const emails = item.emails || (item.email ? [item.email] : []);
-      if (channelKey) {
-        resultsMap[channelKey] = {
-          emails: emails.filter(Boolean),
+      const emails = Array.isArray(item.email) ? item.email.filter(Boolean) : (item.email ? [item.email] : []);
+      if (item.url) {
+        resultsMap[item.url] = {
+          emails,
           status: item.status || "COMPLETED"
         };
+        totalEmailsFound += emails.length;
       }
     });
 
-    console.log(`✅ LurkAPI extraction finished. Processed ${items.length} records.`);
+    console.log(`✅ Bulk email extraction complete: found ${totalEmailsFound} email(s) across ${items.length} channels.`);
     return res.json({ success: true, results: resultsMap });
 
   } catch (err) {
-    console.warn("⚠️ LurkAPI extraction failed, trying fallback exporter24:", err.message);
+    console.warn("⚠️ Primary bulk email scraper failed, trying apidojo fallback:", err.message);
 
-    // Fallback: exporter24/youtube-email-bulk-scraper
+    // Fallback: apidojo/youtube-channel-information-scraper
     try {
-      const fallbackRun = await client.actor("exporter24/youtube-email-bulk-scraper").call({
-        urls: channelUrls.map(url => ({ url }))
+      const fallbackRun = await client.actor("apidojo/youtube-channel-information-scraper").call({
+        startUrls: channelUrls.map(url => ({ url }))
       }, { timeout: 180 });
 
       const { items } = await client.dataset(fallbackRun.defaultDatasetId).listItems();
       const resultsMap = {};
+
       items.forEach(item => {
-        resultsMap[item.url] = {
-          emails: item.email || [],
-          status: item.status
-        };
+        const key = item.channelUrl || item.url;
+        const emails = Array.isArray(item.emails) ? item.emails.filter(Boolean) : (item.email ? [item.email] : []);
+        if (key) {
+          resultsMap[key] = {
+            emails,
+            status: "COMPLETED"
+          };
+        }
       });
+
       return res.json({ success: true, results: resultsMap });
     } catch (fallbackErr) {
       console.error("❌ All Apify bulk extractions failed:", fallbackErr.message);
